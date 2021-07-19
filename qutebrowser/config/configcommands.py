@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,13 +15,13 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Commands related to the configuration."""
 
 import os.path
 import contextlib
-from typing import TYPE_CHECKING, Iterator, List, Optional
+from typing import TYPE_CHECKING, Iterator, List, Optional, Any, Tuple
 
 from PyQt5.QtCore import QUrl
 
@@ -244,7 +244,14 @@ class ConfigCommands:
 
     @cmdutils.register(instance='config-commands')
     @cmdutils.argument('option', completion=configmodel.customized_option)
-    def config_unset(self, option: str, temp: bool = False) -> None:
+    @cmdutils.argument('pattern', flag='u')
+    def config_unset(
+        self,
+        option: str,
+        *,
+        pattern: str = None,
+        temp: bool = False,
+    ) -> None:
         """Unset an option.
 
         This sets an option back to its default and removes it from
@@ -252,24 +259,28 @@ class ConfigCommands:
 
         Args:
             option: The name of the option.
+            pattern: The URL pattern to use.
             temp: Set value temporarily until qutebrowser is closed.
         """
+        parsed_pattern = self._parse_pattern(pattern)
         with self._handle_config_error():
-            self._config.unset(option, save_yaml=not temp)
+            changed = self._config.unset(
+                option,
+                save_yaml=not temp,
+                pattern=parsed_pattern,
+            )
+
+        if not changed:
+            text = f'{option} is not customized'
+            if pattern is not None:
+                text += f' for {pattern}'
+            raise cmdutils.CommandError(text)
 
     @cmdutils.register(instance='config-commands')
     @cmdutils.argument('win_id', value=cmdutils.Value.win_id)
-    def config_diff(self, win_id: int, old: bool = False) -> None:
-        """Show all customized options.
-
-        Args:
-            old: Show difference for the pre-v1.0 files
-                 (qutebrowser.conf/keys.conf).
-        """
+    def config_diff(self, win_id: int) -> None:
+        """Show all customized options."""
         url = QUrl('qute://configdiff')
-        if old:
-            url.setPath('/old')
-
         tabbed_browser = objreg.get('tabbed-browser',
                                     scope='window', window=win_id)
         tabbed_browser.load_url(url, newtab=False)
@@ -464,7 +475,7 @@ class ConfigCommands:
             raise cmdutils.CommandError("{} already exists - use --force to "
                                         "overwrite!".format(filename))
 
-        options: List = []
+        options: List[Tuple[Optional[urlmatch.UrlPattern], configdata.Option, Any]] = []
         if defaults:
             options = [(None, opt, opt.default)
                        for _name, opt in sorted(configdata.DATA.items())]

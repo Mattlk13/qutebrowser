@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2015-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2015-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Tests for usertypes.Question."""
 
@@ -53,25 +53,23 @@ def test_done(mode, answer, signal_names, question, qtbot):
     question.mode = mode
     question.answer = answer
     signals = [getattr(question, name) for name in signal_names]
-    blockers = [qtbot.waitSignal(signal) for signal in signals]
-
-    question.done()
-    for blocker in blockers:
-        blocker.wait()
-
+    with qtbot.wait_signals(signals, order='strict'):
+        question.done()
     assert not question.is_aborted
 
 
 def test_cancel(question, qtbot):
     """Test Question.cancel()."""
-    with qtbot.waitSignal(question.cancelled), qtbot.waitSignal(question.completed):
+    with qtbot.wait_signals([question.cancelled, question.completed],
+                           order='strict'):
         question.cancel()
     assert not question.is_aborted
 
 
 def test_abort(question, qtbot):
     """Test Question.abort()."""
-    with qtbot.waitSignal(question.aborted), qtbot.waitSignal(question.completed):
+    with qtbot.wait_signals([question.aborted, question.completed],
+                           order='strict'):
         question.abort()
     assert question.is_aborted
 

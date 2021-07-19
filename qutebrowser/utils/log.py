@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Loggers and utilities related to logging."""
 
@@ -33,7 +33,7 @@ import json
 import inspect
 import argparse
 from typing import (TYPE_CHECKING, Any, Iterator, Mapping, MutableSequence,
-                    Optional, Set, Tuple, Union, cast)
+                    Optional, Set, Tuple, Union)
 
 from PyQt5 import QtCore
 # Optional imports
@@ -81,7 +81,7 @@ LOG_COLORS = {
 }
 
 # We first monkey-patch logging to support our VDEBUG level before getting the
-# loggers.  Based on http://stackoverflow.com/a/13638084
+# loggers.  Based on https://stackoverflow.com/a/13638084
 # mypy doesn't know about this, so we need to ignore it.
 VDEBUG_LEVEL = 9
 logging.addLevelName(VDEBUG_LEVEL, 'VDEBUG')
@@ -134,7 +134,6 @@ keyboard = logging.getLogger('keyboard')
 downloads = logging.getLogger('downloads')
 js = logging.getLogger('js')  # Javascript console messages
 qt = logging.getLogger('qt')  # Warnings produced by Qt
-rfc6266 = logging.getLogger('rfc6266')
 ipc = logging.getLogger('ipc')
 shlexer = logging.getLogger('shlexer')
 save = logging.getLogger('save')
@@ -153,7 +152,7 @@ LOGGER_NAMES = [
     'destroy', 'modes', 'webview', 'misc',
     'mouse', 'procs', 'hints', 'keyboard',
     'commands', 'signals', 'downloads',
-    'js', 'qt', 'rfc6266', 'ipc', 'shlexer',
+    'js', 'qt', 'ipc', 'shlexer',
     'save', 'message', 'config', 'sessions',
     'webelem', 'prompt', 'network', 'sql',
     'greasemonkey', 'extensions',
@@ -231,6 +230,16 @@ def _init_py_warnings() -> None:
                             message=r"Using or importing the ABCs from "
                             r"'collections' instead of from 'collections.abc' "
                             r"is deprecated.*")
+
+
+@contextlib.contextmanager
+def disable_qt_msghandler() -> Iterator[None]:
+    """Contextmanager which temporarily disables the Qt message handler."""
+    old_handler = QtCore.qInstallMessageHandler(None)
+    try:
+        yield
+    finally:
+        QtCore.qInstallMessageHandler(old_handler)
 
 
 @contextlib.contextmanager
@@ -354,12 +363,16 @@ def change_console_formatter(level: int) -> None:
         level: The numeric logging level
     """
     assert console_handler is not None
+    old_formatter = console_handler.formatter
 
-    old_formatter = cast(ColoredFormatter, console_handler.formatter)
-    console_fmt = get_console_format(level)
-    console_formatter = ColoredFormatter(console_fmt, DATEFMT, '{',
-                                         use_colors=old_formatter.use_colors)
-    console_handler.setFormatter(console_formatter)
+    if isinstance(old_formatter, ColoredFormatter):
+        console_fmt = get_console_format(level)
+        console_formatter = ColoredFormatter(
+            console_fmt, DATEFMT, '{', use_colors=old_formatter.use_colors)
+        console_handler.setFormatter(console_formatter)
+    else:
+        # Same format for all levels
+        assert isinstance(old_formatter, JSONFormatter), old_formatter
 
 
 def qt_message_handler(msg_type: QtCore.QtMsgType,
@@ -482,8 +495,7 @@ def qt_message_handler(msg_type: QtCore.QtMsgType,
     else:
         func = context.function
 
-    if (context.category is None or  # type: ignore[unreachable]
-            context.category == 'default'):
+    if context.category is None or context.category == 'default':
         name = 'qt'
     else:
         name = 'qt-' + context.category

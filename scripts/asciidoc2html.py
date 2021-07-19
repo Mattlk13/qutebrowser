@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 
 # This file is part of qutebrowser.
 #
@@ -16,7 +16,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Generate the html documentation based on the asciidoc files."""
 
@@ -293,7 +293,7 @@ def run(**kwargs) -> None:
     except FileNotFoundError:
         utils.print_error("Could not find asciidoc! Please install it, or use "
                           "the --asciidoc argument to point this script to "
-                          "the correct python/asciidoc.py location!")
+                          "the correct asciidoc.py location!")
         sys.exit(1)
 
     try:

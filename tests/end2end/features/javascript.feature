@@ -56,7 +56,7 @@ Feature: Javascript stuff
         And I open data/javascript/window_open.html in a new tab
         And I run :click-element id open-normal
         And I wait for "Changing title for idx 2 to 'about:blank'" in the log
-        And I run :buffer window_open.html
+        And I run :tab-select window_open.html
         And I run :click-element id close-twice
         And I wait for "Focus object changed: *" in the log
         And I wait for "[*] window closed" in the log
@@ -167,7 +167,7 @@ Feature: Javascript stuff
         Then "Showing error page for* 500" should be logged
         And "Load error: *500" should be logged
 
-    @flaky
+    @skip   # Too flaky
     Scenario: Using JS after window.open
         When I open data/hello.txt
         And I set content.javascript.can_open_tabs_automatically to true
@@ -177,5 +177,5 @@ Feature: Javascript stuff
         And I open data/hints/html/simple.html
         And I run :hint all
         And I wait for "hints: a" in the log
-        And I run :leave-mode
+        And I run :mode-leave
         Then "There was an error while getting hint elements" should not be logged

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Types for options in qutebrowser's configuration.
 
@@ -50,14 +50,14 @@ import itertools
 import functools
 import operator
 import json
+import dataclasses
 from typing import (Any, Callable, Dict as DictType, Iterable, Iterator,
                     List as ListType, Optional, Pattern, Sequence, Tuple, Union)
 
-import attr
 import yaml
 from PyQt5.QtCore import QUrl, Qt
-from PyQt5.QtGui import QColor, QFontDatabase
-from PyQt5.QtWidgets import QTabWidget, QTabBar, QApplication
+from PyQt5.QtGui import QColor
+from PyQt5.QtWidgets import QTabWidget, QTabBar
 from PyQt5.QtNetwork import QNetworkProxy
 
 from qutebrowser.misc import objects, debugcachestats
@@ -86,6 +86,21 @@ _UnsetNone = Union[None, usertypes.Unset]
 _StrUnsetNone = Union[str, _UnsetNone]
 
 
+def _validate_encoding(encoding: Optional[str], value: str) -> None:
+    """Check if the given value fits into the given encoding.
+
+    Raises ValidationError if not.
+    """
+    if encoding is None:
+        return
+
+    try:
+        value.encode(encoding)
+    except UnicodeEncodeError as e:
+        msg = f"{value!r} contains non-{encoding} characters: {e}"
+        raise configexc.ValidationError(value, msg)
+
+
 class ValidValues:
 
     """Container for valid values for a given type.
@@ -96,9 +111,15 @@ class ValidValues:
         generate_docs: Whether to show the values in the docs.
     """
 
-    def __init__(self,
-                 *values: Union[str, DictType[str, str], Tuple[str, str]],
-                 generate_docs: bool = True) -> None:
+    def __init__(
+            self,
+            *values: Union[
+                str,
+                DictType[str, Optional[str]],
+                Tuple[str, Optional[str]],
+            ],
+            generate_docs: bool = True,
+    ) -> None:
         if not values:
             raise ValueError("ValidValues with no values makes no sense!")
         self.descriptions: DictType[str, str] = {}
@@ -107,17 +128,18 @@ class ValidValues:
         for value in values:
             if isinstance(value, str):
                 # Value without description
-                self.values.append(value)
+                val = value
+                desc = None
             elif isinstance(value, dict):
                 # List of dicts from configdata.yml
                 assert len(value) == 1, value
-                value, desc = list(value.items())[0]
-                self.values.append(value)
-                self.descriptions[value] = desc
+                val, desc = list(value.items())[0]
             else:
-                # (value, description) tuple
-                self.values.append(value[0])
-                self.descriptions[value[0]] = value[1]
+                val, desc = value
+
+            self.values.append(val)
+            if desc is not None:
+                self.descriptions[val] = desc
 
     def __contains__(self, val: str) -> bool:
         return val in self.values
@@ -141,13 +163,19 @@ class BaseType:
 
     Attributes:
         none_ok: Whether to allow None (or an empty string for :set) as value.
+        _completions: Override for completions for the given setting.
 
     Class attributes:
         valid_values: Possible values if they can be expressed as a fixed
                       string. ValidValues instance.
     """
 
-    def __init__(self, none_ok: bool = False) -> None:
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        self._completions = completions
         self.none_ok = none_ok
         self.valid_values: Optional[ValidValues] = None
 
@@ -295,7 +323,7 @@ class BaseType:
         str_value = self.to_str(value)
         if not str_value:
             return 'empty'
-        return '+pass:[{}]+'.format(html.escape(str_value))
+        return '+pass:[{}]+'.format(html.escape(str_value).replace(']', '\\]'))
 
     def complete(self) -> _Completions:
         """Return a list of possible values for completion.
@@ -306,22 +334,17 @@ class BaseType:
         Return:
             A list of (value, description) tuples or None.
         """
-        if self.valid_values is None:
+        if self._completions is not None:
+            return self._completions
+        elif self.valid_values is None:
             return None
-        else:
-            out = []
-            for val in self.valid_values:
-                try:
-                    desc = self.valid_values.descriptions[val]
-                except KeyError:
-                    # Some values are self-explaining and don't need a
-                    # description.
-                    desc = ""
-                out.append((val, desc))
-            return out
+        return [
+            (val, self.valid_values.descriptions.get(val, ""))
+            for val in self.valid_values
+        ]
 
     def __repr__(self) -> str:
-        return utils.get_repr(self, none_ok=self.none_ok)
+        return utils.get_repr(self, none_ok=self.none_ok, completions=self._completions)
 
 
 class MappingType(BaseType):
@@ -329,14 +352,19 @@ class MappingType(BaseType):
     """Base class for any setting which has a mapping to the given values.
 
     Attributes:
-        MAPPING: The mapping to use.
+        MAPPING: A mapping from config values to (translated_value, docs) tuples.
     """
 
-    MAPPING: DictType[str, Any] = {}
+    MAPPING: DictType[str, Tuple[Any, Optional[str]]] = {}
 
-    def __init__(self, none_ok: bool = False, valid_values: ValidValues = None) -> None:
-        super().__init__(none_ok)
-        self.valid_values = valid_values
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
+        self.valid_values = ValidValues(
+            *[(key, doc) for (key, (_val, doc)) in self.MAPPING.items()])
 
     def to_py(self, value: Any) -> Any:
         self._basic_py_validation(value, str)
@@ -345,7 +373,8 @@ class MappingType(BaseType):
         elif not value:
             return None
         self._validate_valid_values(value.lower())
-        return self.MAPPING[value.lower()]
+        mapped, _doc = self.MAPPING[value.lower()]
+        return mapped
 
     def __repr__(self) -> str:
         return utils.get_repr(self, none_ok=self.none_ok,
@@ -363,15 +392,22 @@ class String(BaseType):
         maxlen: Maximum length (inclusive).
         forbidden: Forbidden chars in the string.
         regex: A regex used to validate the string.
+        encoding: The encoding the value needs to fit in.
         completions: completions to be used, or None
     """
 
-    def __init__(self, *, minlen: int = None, maxlen: int = None,
-                 forbidden: str = None, regex: str = None,
-                 encoding: str = None, none_ok: bool = False,
-                 completions: _Completions = None,
-                 valid_values: ValidValues = None) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            minlen: int = None,
+            maxlen: int = None,
+            forbidden: str = None,
+            regex: str = None,
+            encoding: str = None,
+            none_ok: bool = False,
+            completions: _Completions = None,
+            valid_values: ValidValues = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = valid_values
 
         if minlen is not None and minlen < 1:
@@ -384,27 +420,8 @@ class String(BaseType):
         self.minlen = minlen
         self.maxlen = maxlen
         self.forbidden = forbidden
-        self._completions = completions
         self.encoding = encoding
         self.regex = regex
-
-    def _validate_encoding(self, value: str) -> None:
-        """Check if the given value fits into the configured encoding.
-
-        Raises ValidationError if not.
-
-        Args:
-            value: The value to check.
-        """
-        if self.encoding is None:
-            return
-
-        try:
-            value.encode(self.encoding)
-        except UnicodeEncodeError as e:
-            msg = "{!r} contains non-{} characters: {}".format(
-                value, self.encoding, e)
-            raise configexc.ValidationError(value, msg)
 
     def to_py(self, value: _StrUnset) -> _StrUnsetNone:
         self._basic_py_validation(value, str)
@@ -413,7 +430,7 @@ class String(BaseType):
         elif not value:
             return None
 
-        self._validate_encoding(value)
+        _validate_encoding(self.encoding, value)
         self._validate_valid_values(value)
 
         if self.forbidden is not None and any(c in value
@@ -431,12 +448,6 @@ class String(BaseType):
                                             .format(self.regex))
 
         return value
-
-    def complete(self) -> _Completions:
-        if self._completions is not None:
-            return self._completions
-        else:
-            return super().complete()
 
     def __repr__(self) -> str:
         return utils.get_repr(self, none_ok=self.none_ok,
@@ -475,10 +486,15 @@ class List(BaseType):
 
     _show_valtype = True
 
-    def __init__(self, valtype: BaseType,
-                 none_ok: bool = False,
-                 length: int = None) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self,
+            valtype: BaseType,
+            *,
+            length: int = None,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valtype = valtype
         self.length = length
 
@@ -567,12 +583,17 @@ class ListOrValue(BaseType):
 
     _show_valtype = True
 
-    def __init__(self, valtype: BaseType, *,
-                 none_ok: bool = False,
-                 **kwargs: Any) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self,
+            valtype: BaseType,
+            *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+            **kwargs: Any,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         assert not isinstance(valtype, (List, ListOrValue)), valtype
-        self.listtype = List(valtype, none_ok=none_ok, **kwargs)
+        self.listtype = List(valtype=valtype, none_ok=none_ok, **kwargs)
         self.valtype = valtype
 
     def _val_and_type(self, value: Any) -> Tuple[Any, BaseType]:
@@ -641,10 +662,19 @@ class FlagList(List):
 
     _show_valtype = False
 
-    def __init__(self, none_ok: bool = False,
-                 valid_values: ValidValues = None,
-                 length: int = None) -> None:
-        super().__init__(valtype=String(), none_ok=none_ok, length=length)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+            valid_values: ValidValues = None,
+            length: int = None,
+    ) -> None:
+        super().__init__(
+            valtype=String(),
+            none_ok=none_ok,
+            length=length,
+            completions=completions,
+        )
         self.valtype.valid_values = valid_values
 
     def _check_duplicates(self, values: ListType) -> None:
@@ -662,6 +692,9 @@ class FlagList(List):
         return vals
 
     def complete(self) -> _Completions:
+        if self._completions is not None:
+            return self._completions
+
         valid_values = self.valtype.valid_values
         if valid_values is None:
             return None
@@ -695,8 +728,12 @@ class Bool(BaseType):
     while `0`, `no`, `off` and `false` count as false (case-insensitive).
     """
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues('true', 'false', generate_docs=False)
 
     def to_py(self, value: Union[bool, str, None]) -> Optional[bool]:
@@ -727,8 +764,12 @@ class BoolAsk(Bool):
 
     """Like `Bool`, but `ask` is allowed as additional value."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues('true', 'false', 'ask')
 
     def to_py(self,  # type: ignore[override]
@@ -766,11 +807,15 @@ class _Numeric(BaseType):  # pylint: disable=abstract-method
         maxval: Maximum value (inclusive).
     """
 
-    def __init__(self, minval: int = None,
-                 maxval: int = None,
-                 zero_ok: bool = True,
-                 none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            minval: int = None,
+            maxval: int = None,
+            zero_ok: bool = True,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.minval = self._parse_bound(minval)
         self.maxval = self._parse_bound(maxval)
         self.zero_ok = zero_ok
@@ -910,10 +955,21 @@ class PercOrInt(_Numeric):
         maxint: Maximum value for integer (inclusive).
     """
 
-    def __init__(self, minperc: int = None, maxperc: int = None,
-                 minint: int = None, maxint: int = None,
-                 none_ok: bool = False) -> None:
-        super().__init__(minval=minint, maxval=maxint, none_ok=none_ok)
+    def __init__(
+            self, *,
+            minperc: int = None,
+            maxperc: int = None,
+            minint: int = None,
+            maxint: int = None,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(
+            minval=minint,
+            maxval=maxint,
+            none_ok=none_ok,
+            completions=completions,
+        )
         self.minperc = self._parse_bound(minperc)
         self.maxperc = self._parse_bound(maxperc)
         if (self.maxperc is not None and self.minperc is not None and
@@ -984,6 +1040,9 @@ class Command(BaseType):
     """
 
     def complete(self) -> _Completions:
+        if self._completions is not None:
+            return self._completions
+
         out = []
         for cmdname, obj in objects.commands.items():
             out.append((cmdname, obj.desc))
@@ -998,20 +1057,11 @@ class ColorSystem(MappingType):
 
     """The color system to use for color interpolation."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(
-            none_ok,
-            valid_values=ValidValues(
-                ('rgb', "Interpolate in the RGB color system."),
-                ('hsv', "Interpolate in the HSV color system."),
-                ('hsl', "Interpolate in the HSL color system."),
-                ('none', "Don't show a gradient.")))
-
     MAPPING = {
-        'rgb': QColor.Rgb,
-        'hsv': QColor.Hsv,
-        'hsl': QColor.Hsl,
-        'none': None,
+        'rgb': (QColor.Rgb, "Interpolate in the RGB color system."),
+        'hsv': (QColor.Hsv, "Interpolate in the HSV color system."),
+        'hsl': (QColor.Hsl, "Interpolate in the HSL color system."),
+        'none': (None, "Don't show a gradient."),
     }
 
 
@@ -1019,19 +1069,13 @@ class IgnoreCase(MappingType):
 
     """Whether to search case insensitively."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(
-            none_ok,
-            valid_values=ValidValues(
-                ('always', "Search case-insensitively."),
-                ('never', "Search case-sensitively."),
-                ('smart', ("Search case-sensitively if there are capital "
-                           "characters."))))
-
     MAPPING = {
-        'always': usertypes.IgnoreCase.always,
-        'never': usertypes.IgnoreCase.never,
-        'smart': usertypes.IgnoreCase.smart,
+        'always': (usertypes.IgnoreCase.always, "Search case-insensitively."),
+        'never': (usertypes.IgnoreCase.never, "Search case-sensitively."),
+        'smart': (
+            usertypes.IgnoreCase.smart,
+            "Search case-sensitively if there are capital characters."
+        ),
     }
 
 
@@ -1043,7 +1087,7 @@ class QtColor(BaseType):
 
     * `#RGB`/`#RRGGBB`/`#AARRGGBB`/`#RRRGGGBBB`/`#RRRRGGGGBBBB`
     * An SVG color name as specified in
-      http://www.w3.org/TR/SVG/types.html#ColorKeywords[the W3C specification].
+      https://www.w3.org/TR/SVG/types.html#ColorKeywords[the W3C specification].
     * transparent (no color)
     * `rgb(r, g, b)` / `rgba(r, g, b, a)` (values 0-255 or percentages)
     * `hsv(h, s, v)` / `hsva(h, s, v, a)` (values 0-255, hue 0-359)
@@ -1114,12 +1158,12 @@ class QssColor(BaseType):
 
     * `#RGB`/`#RRGGBB`/`#AARRGGBB`/`#RRRGGGBBB`/`#RRRRGGGGBBBB`
     * An SVG color name as specified in
-      http://www.w3.org/TR/SVG/types.html#ColorKeywords[the W3C specification].
+      https://www.w3.org/TR/SVG/types.html#ColorKeywords[the W3C specification].
     * transparent (no color)
     * `rgb(r, g, b)` / `rgba(r, g, b, a)` (values 0-255 or percentages)
     * `hsv(h, s, v)` / `hsva(h, s, v, a)` (values 0-255, hue 0-359)
     * A gradient as explained in
-      http://doc.qt.io/qt-5/stylesheet-reference.html#list-of-property-types[the Qt documentation]
+      https://doc.qt.io/qt-5/stylesheet-reference.html#list-of-property-types[the Qt documentation]
       under ``Gradient''
     """
 
@@ -1172,50 +1216,11 @@ class FontBase(BaseType):
 
         If the given family value (fonts.default_family in the config) is
         unset, a system-specific default monospace font is used.
-
-        Note that (at least) three ways of getting the default monospace font
-        exist:
-
-        1) f = QFont()
-           f.setStyleHint(QFont.Monospace)
-           print(f.defaultFamily())
-
-        2) f = QFont()
-           f.setStyleHint(QFont.TypeWriter)
-           print(f.defaultFamily())
-
-        3) f = QFontDatabase.systemFont(QFontDatabase.FixedFont)
-           print(f.family())
-
-        They yield different results depending on the OS:
-
-                   QFont.Monospace  | QFont.TypeWriter    | QFontDatabase
-                   ------------------------------------------------------
-        Windows:   Courier New      | Courier New         | Courier New
-        Linux:     DejaVu Sans Mono | DejaVu Sans Mono    | monospace
-        macOS:     Menlo            | American Typewriter | Monaco
-
-        Test script: https://p.cmpl.cc/d4dfe573
-
-        On Linux, it seems like both actually resolve to the same font.
-
-        On macOS, "American Typewriter" looks like it indeed tries to imitate a
-        typewriter, so it's not really a suitable UI font.
-
-        Looking at those Wikipedia articles:
-
-        https://en.wikipedia.org/wiki/Monaco_(typeface)
-        https://en.wikipedia.org/wiki/Menlo_(typeface)
-
-        the "right" choice isn't really obvious. Thus, let's go for the
-        QFontDatabase approach here, since it's by far the simplest one.
         """
         if default_family:
             families = configutils.FontFamilies(default_family)
         else:
-            assert QApplication.instance() is not None
-            font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
-            families = configutils.FontFamilies([font.family()])
+            families = configutils.FontFamilies.from_system_default()
 
         cls.default_family = families.to_str(quote=True)
         cls.default_size = default_size
@@ -1291,9 +1296,13 @@ class Regex(BaseType):
         _regex_type: The Python type of a regex object.
     """
 
-    def __init__(self, flags: str = None,
-                 none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            flags: str = None,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self._regex_type = type(re.compile(''))
         # Parse flags from configdata.yml
         if flags is None:
@@ -1357,12 +1366,16 @@ class Dict(BaseType):
     When setting from a string, pass a json-like dict, e.g. `{"key", "value"}`.
     """
 
-    def __init__(self, keytype: Union[String, 'Key'],
-                 valtype: BaseType, *,
-                 fixed_keys: Iterable = None,
-                 required_keys: Iterable = None,
-                 none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            keytype: Union[String, 'Key'],
+            valtype: BaseType,
+            fixed_keys: Iterable = None,
+            required_keys: Iterable = None,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         # If the keytype is not a string, we'll get problems with showing it as
         # json in to_str() as json converts keys to strings.
         assert isinstance(keytype, (String, Key)), keytype
@@ -1461,8 +1474,13 @@ class File(BaseType):
 
     """A file on the local filesystem."""
 
-    def __init__(self, required: bool = True, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
+    def __init__(
+            self, *,
+            required: bool = True,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.required = required
 
     def to_py(self, value: _StrUnset) -> _StrUnsetNone:
@@ -1524,14 +1542,21 @@ class FormatString(BaseType):
 
     Attributes:
         fields: Which replacements are allowed in the format string.
+        encoding: Which encoding the string should fit into.
         completions: completions to be used, or None
     """
 
-    def __init__(self, fields: Iterable[str],
-                 none_ok: bool = False,
-                 completions: _Completions = None) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            fields: Iterable[str],
+            none_ok: bool = False,
+            encoding: str = None,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(
+            none_ok=none_ok, completions=completions)
         self.fields = fields
+        self.encoding = encoding
         self._completions = completions
 
     def to_py(self, value: _StrUnset) -> _StrUnsetNone:
@@ -1541,21 +1566,17 @@ class FormatString(BaseType):
         elif not value:
             return None
 
+        _validate_encoding(self.encoding, value)
+
         try:
             value.format(**{k: '' for k in self.fields})
-        except (KeyError, IndexError) as e:
+        except (KeyError, IndexError, AttributeError) as e:
             raise configexc.ValidationError(value, "Invalid placeholder "
                                             "{}".format(e))
         except ValueError as e:
             raise configexc.ValidationError(value, str(e))
 
         return value
-
-    def complete(self) -> _Completions:
-        if self._completions is not None:
-            return self._completions
-        else:
-            return super().complete()
 
     def __repr__(self) -> str:
         return utils.get_repr(self, none_ok=self.none_ok, fields=self.fields)
@@ -1573,9 +1594,13 @@ class ShellCommand(List):
 
     _show_valtype = False
 
-    def __init__(self, placeholder: bool = False,
-                 none_ok: bool = False) -> None:
-        super().__init__(valtype=String(), none_ok=none_ok)
+    def __init__(
+            self, *,
+            placeholder: bool = False,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(valtype=String(), none_ok=none_ok, completions=completions)
         self.placeholder = placeholder
 
     def to_py(
@@ -1605,8 +1630,12 @@ class Proxy(BaseType):
 
     """A proxy URL, or `system`/`none`."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues(
             ('system', "Use the system wide proxy."),
             ('none', "Don't use any proxy"))
@@ -1638,6 +1667,9 @@ class Proxy(BaseType):
             raise configexc.ValidationError(value, e)
 
     def complete(self) -> _Completions:
+        if self._completions is not None:
+            return self._completions
+
         assert self.valid_values is not None
         out = []
         for val in self.valid_values:
@@ -1697,15 +1729,15 @@ class FuzzyUrl(BaseType):
             raise configexc.ValidationError(value, str(e))
 
 
-@attr.s
+@dataclasses.dataclass
 class PaddingValues:
 
     """Four padding values."""
 
-    top: int = attr.ib()
-    bottom: int = attr.ib()
-    left: int = attr.ib()
-    right: int = attr.ib()
+    top: int
+    bottom: int
+    left: int
+    right: int
 
 
 class Padding(Dict):
@@ -1714,11 +1746,18 @@ class Padding(Dict):
 
     _show_valtype = False
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(keytype=String(),
-                         valtype=Int(minval=0, none_ok=none_ok),
-                         fixed_keys=['top', 'bottom', 'left', 'right'],
-                         none_ok=none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(
+            keytype=String(),
+            valtype=Int(minval=0, none_ok=none_ok),
+            fixed_keys=['top', 'bottom', 'left', 'right'],
+            none_ok=none_ok,
+            completions=completions
+        )
 
     def to_py(  # type: ignore[override]
             self,
@@ -1753,16 +1792,11 @@ class Position(MappingType):
     """The position of the tab bar."""
 
     MAPPING = {
-        'top': QTabWidget.North,
-        'bottom': QTabWidget.South,
-        'left': QTabWidget.West,
-        'right': QTabWidget.East,
+        'top': (QTabWidget.North, None),
+        'bottom': (QTabWidget.South, None),
+        'left': (QTabWidget.West, None),
+        'right': (QTabWidget.East, None),
     }
-
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(
-            none_ok,
-            valid_values=ValidValues('top', 'bottom', 'left', 'right'))
 
 
 class TextAlignment(MappingType):
@@ -1770,23 +1804,22 @@ class TextAlignment(MappingType):
     """Alignment of text."""
 
     MAPPING = {
-        'left': Qt.AlignLeft,
-        'right': Qt.AlignRight,
-        'center': Qt.AlignCenter,
+        'left': (Qt.AlignLeft, None),
+        'right': (Qt.AlignRight, None),
+        'center': (Qt.AlignCenter, None),
     }
-
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(
-            none_ok,
-            valid_values=ValidValues('left', 'right', 'center'))
 
 
 class VerticalPosition(String):
 
     """The position of the download bar."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok=none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues('top', 'bottom')
 
 
@@ -1828,20 +1861,21 @@ class SelectOnRemove(MappingType):
     """Which tab to select when the focused tab is removed."""
 
     MAPPING = {
-        'prev': QTabBar.SelectLeftTab,
-        'next': QTabBar.SelectRightTab,
-        'last-used': QTabBar.SelectPreviousTab,
+        'prev': (
+            QTabBar.SelectLeftTab,
+            ("Select the tab which came before the closed one "
+             "(left in horizontal, above in vertical)."),
+        ),
+        'next': (
+            QTabBar.SelectRightTab,
+            ("Select the tab which came after the closed one "
+             "(right in horizontal, below in vertical)."),
+        ),
+        'last-used': (
+            QTabBar.SelectPreviousTab,
+            "Select the previously selected tab.",
+        ),
     }
-
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(
-            none_ok,
-            valid_values=ValidValues(
-                ('prev', "Select the tab which came before the closed one "
-                 "(left in horizontal, above in vertical)."),
-                ('next', "Select the tab which came after the closed one "
-                 "(right in horizontal, below in vertical)."),
-                ('last-used', "Select the previously selected tab.")))
 
 
 class ConfirmQuit(FlagList):
@@ -1851,8 +1885,12 @@ class ConfirmQuit(FlagList):
     # Values that can be combined with commas
     combinable_values = ('multiple-tabs', 'downloads')
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valtype.none_ok = none_ok
         self.valtype.valid_values = ValidValues(
             ('always', "Always show a confirmation."),
@@ -1888,8 +1926,12 @@ class NewTabPosition(String):
 
     """How new tabs are positioned."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok=none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues(
             ('prev', "Before the current tab."),
             ('next', "After the current tab."),
@@ -1901,8 +1943,12 @@ class LogLevel(String):
 
     """A logging level."""
 
-    def __init__(self, none_ok: bool = False) -> None:
-        super().__init__(none_ok=none_ok)
+    def __init__(
+            self, *,
+            none_ok: bool = False,
+            completions: _Completions = None,
+    ) -> None:
+        super().__init__(none_ok=none_ok, completions=completions)
         self.valid_values = ValidValues(*[level.lower()
                                           for level in log.LOG_LEVELS])
 
@@ -1953,3 +1999,16 @@ class UrlPattern(BaseType):
             return urlmatch.UrlPattern(value)
         except urlmatch.ParseError as e:
             raise configexc.ValidationError(value, str(e))
+
+
+class StatusbarWidget(String):
+
+    """A widget for the status bar.
+
+    Allows some predefined widgets and custom text-widgets via text:$CONTENT.
+    """
+
+    def _validate_valid_values(self, value: str) -> None:
+        if value.startswith("text:"):
+            return
+        super()._validate_valid_values(value)

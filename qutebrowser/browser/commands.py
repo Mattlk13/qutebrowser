@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Command dispatcher for TabbedBrowser."""
 
@@ -25,7 +25,7 @@ import functools
 from typing import cast, Callable, Dict, Union
 
 from PyQt5.QtWidgets import QApplication, QTabBar
-from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QEvent, QUrlQuery
+from PyQt5.QtCore import Qt, QUrl, QEvent, QUrlQuery
 
 from qutebrowser.commands import userscripts, runners
 from qutebrowser.api import cmdutils
@@ -65,7 +65,7 @@ class CommandDispatcher:
 
     def _new_tabbed_browser(self, private):
         """Get a tabbed-browser from a new window."""
-        args = QApplication.instance().arguments()
+        args = objects.qapp.arguments()
         if private and '--single-process' in args:
             raise cmdutils.CommandError("Private windows are unavailable with "
                                         "the single-process process model.")
@@ -329,7 +329,9 @@ class CommandDispatcher:
                         # Explicit count with a tab that doesn't exist.
                         return
                 elif curtab.navigation_blocked():
-                    message.info("Tab is pinned!")
+                    message.info("Tab is pinned! Opening in new tab.")
+                    self._tabbed_browser.tabopen(cur_url)
+
                 else:
                     curtab.load_url(cur_url)
 
@@ -427,7 +429,7 @@ class CommandDispatcher:
 
     @cmdutils.register(instance='command-dispatcher', scope='window',
                        maxsplit=0)
-    @cmdutils.argument('index', completion=miscmodels.other_buffer)
+    @cmdutils.argument('index', completion=miscmodels.other_tabs)
     def tab_take(self, index, keep=False):
         """Take a tab from another window.
 
@@ -440,7 +442,7 @@ class CommandDispatcher:
             raise cmdutils.CommandError("Can't take tabs when using "
                                         "windows as tabs")
 
-        tabbed_browser, tab = self._resolve_buffer_index(index)
+        tabbed_browser, tab = self._resolve_tab_index(index)
 
         if tabbed_browser is self._tabbed_browser:
             raise cmdutils.CommandError("Can't take a tab from the same "
@@ -600,7 +602,7 @@ class CommandDispatcher:
         widget = self._current_widget()
         url = self._current_url()
 
-        handlers: Dict[str, Callable] = {
+        handlers: Dict[str, Callable[..., QUrl]] = {
             'prev': functools.partial(navigate.prevnext, prev=True),
             'next': functools.partial(navigate.prevnext, prev=False),
             'up': navigate.path_up,
@@ -754,17 +756,23 @@ class CommandDispatcher:
                               maybe=True)
 
     @cmdutils.register(instance='command-dispatcher', scope='window')
-    def tab_only(self, prev=False, next_=False, force=False):
+    @cmdutils.argument('pinned', choices=['prompt', 'close', 'keep'], flag='P',
+                       metavar='behavior')
+    @cmdutils.argument('force', hide=True)
+    def tab_only(self, *, prev=False, next_=False, pinned='prompt', force=False):
         """Close all tabs except for the current one.
 
         Args:
             prev: Keep tabs before the current.
             next_: Keep tabs after the current.
+            pinned: What to do with pinned tabs.
+                    Valid values: prompt, close, keep.
             force: Avoid confirmation for pinned tabs.
         """
         cmdutils.check_exclusive((prev, next_), 'pn')
         cur_idx = self._tabbed_browser.widget.currentIndex()
-        assert cur_idx != -1
+        if cur_idx == -1:
+            raise cmdutils.CommandError("Failed to get current tab for :tab-only")
 
         def _to_close(i):
             """Helper method to check if a tab should be closed or not."""
@@ -772,24 +780,28 @@ class CommandDispatcher:
                         (prev and i < cur_idx) or
                         (next_ and i > cur_idx))
 
+        if force:
+            message.warning("--force is deprecated, use --pinned close instead.")
+            pinned = 'close'
+
         # close as many tabs as we can
         first_tab = True
         pinned_tabs_cleanup = False
         for i, tab in enumerate(self._tabbed_browser.widgets()):
             if _to_close(i):
-                if force or not tab.data.pinned:
+                if pinned == 'close' or not tab.data.pinned:
                     self._tabbed_browser.close_tab(tab, new_undo=first_tab)
                     first_tab = False
                 else:
                     pinned_tabs_cleanup = tab
 
         # Check to see if we would like to close any pinned tabs
-        if pinned_tabs_cleanup:
+        if pinned_tabs_cleanup and pinned == 'prompt':
             self._tabbed_browser.tab_close_prompt_if_pinned(
                 pinned_tabs_cleanup,
-                force,
+                pinned == 'close',
                 lambda: self.tab_only(
-                    prev=prev, next_=next_, force=True),
+                    prev=prev, next_=next_, pinned='close'),
                 text="Are you sure you want to close pinned tabs?")
 
     @cmdutils.register(instance='command-dispatcher', scope='window')
@@ -867,8 +879,8 @@ class CommandDispatcher:
         else:
             log.webview.debug("Last tab")
 
-    def _resolve_buffer_index(self, index):
-        """Resolve a buffer index to the tabbedbrowser and tab.
+    def _resolve_tab_index(self, index):
+        """Resolve a tab index to the tabbedbrowser and tab.
 
         Args:
             index: The [win_id/]index of the tab to be selected. Or a substring
@@ -880,7 +892,7 @@ class CommandDispatcher:
             for part in index_parts:
                 int(part)
         except ValueError:
-            model = miscmodels.buffer()
+            model = miscmodels.tabs()
             model.set_pattern(index)
             if model.count() > 0:
                 index = model.data(model.first_item())
@@ -915,9 +927,9 @@ class CommandDispatcher:
 
     @cmdutils.register(instance='command-dispatcher', scope='window',
                        maxsplit=0)
-    @cmdutils.argument('index', completion=miscmodels.buffer)
+    @cmdutils.argument('index', completion=miscmodels.tabs)
     @cmdutils.argument('count', value=cmdutils.Value.count)
-    def buffer(self, index=None, count=None):
+    def tab_select(self, index=None, count=None):
         """Select tab by index or url/title best match.
 
         Focuses window if necessary when index is given. If both index and
@@ -937,11 +949,10 @@ class CommandDispatcher:
         if count is not None:
             index = str(count)
 
-        tabbed_browser, tab = self._resolve_buffer_index(index)
+        tabbed_browser, tab = self._resolve_tab_index(index)
 
         window = tabbed_browser.widget.window()
-        window.activateWindow()
-        window.raise_()
+        mainwindow.raise_window(window)
         tabbed_browser.widget.setCurrentWidget(tab)
 
     @cmdutils.register(instance='command-dispatcher', scope='window')
@@ -971,6 +982,9 @@ class CommandDispatcher:
             self._tab_focus_stack(index)
             return
         elif index is None:
+            message.warning(
+                "Using :tab-focus without count is deprecated, "
+                "use :tab-next instead.")
             self.tab_next()
             return
 
@@ -1057,7 +1071,8 @@ class CommandDispatcher:
             verbose: Show notifications when the command started/exited.
             output: Show the output in a new tab.
             output_messages: Show the output as messages.
-            detach: Whether the command should be detached from qutebrowser.
+            detach: Detach the command from qutebrowser so that it continues
+                    running when qutebrowser quits.
             cmdline: The commandline to execute.
             count: Given to userscripts as $QUTE_COUNT.
         """
@@ -1073,12 +1088,11 @@ class CommandDispatcher:
         log.procs.debug("Executing {} with args {}, userscript={}".format(
             cmd, args, userscript))
 
-        @pyqtSlot()
-        def _on_proc_finished():
+        def _on_proc_finished(proc):
             if output:
                 tb = objreg.get('tabbed-browser', scope='window',
                                 window='last-focused')
-                tb.load_url(QUrl('qute://spawn-output'), newtab=True)
+                tb.load_url(QUrl(f'qute://process/{proc.pid}'), newtab=True)
 
         if userscript:
             def _selection_callback(s):
@@ -1108,7 +1122,7 @@ class CommandDispatcher:
                                  "detailed error")
             else:
                 proc.start(cmd, args)
-            proc.finished.connect(_on_proc_finished)
+            proc.finished.connect(functools.partial(_on_proc_finished, proc))
 
     def _run_userscript(self, selection, cmd, args, verbose, output_messages,
                         count):
@@ -1281,6 +1295,21 @@ class CommandDispatcher:
         message.info("Removed bookmark {}".format(url))
 
     @cmdutils.register(instance='command-dispatcher', scope='window')
+    def bookmark_list(self, jump=False, tab=True, bg=False, window=False):
+        """Show all bookmarks/quickmarks.
+
+        Args:
+            tab: Open in a new tab.
+            bg: Open in a background tab.
+            window: Open in a new window.
+            jump: Jump to the "bookmarks" header.
+        """
+        url = QUrl('qute://bookmarks/')
+        if jump:
+            url.setFragment('bookmarks')
+        self._open(url, tab, bg, window)
+
+    @cmdutils.register(instance='command-dispatcher', scope='window')
     def download(self, url=None, *, mhtml_=False, dest=None):
         """Download a given URL, or current page if no URL given.
 
@@ -1342,6 +1371,7 @@ class CommandDispatcher:
                       the case for QtWebKit. For QtWebEngine it may display
                       slightly different source.
                       Some JavaScript processing may be applied.
+                      Needs the optional Pygments dependency for highlighting.
         """
         tab = self._current_widget()
         try:
@@ -1444,8 +1474,8 @@ class CommandDispatcher:
 
         self._open(url, tab, bg, window)
 
-    def _open_editor_cb(self, elem):
-        """Open editor after the focus elem was found in open_editor."""
+    def _edit_text_cb(self, elem):
+        """Open editor after the focus elem was found in edit_text."""
         if elem is None:
             message.error("No element focused!")
             return
@@ -1469,14 +1499,14 @@ class CommandDispatcher:
         ed.edit(text, caret_position)
 
     @cmdutils.register(instance='command-dispatcher', scope='window')
-    def open_editor(self):
+    def edit_text(self):
         """Open an external editor with the currently selected form field.
 
         The editor which should be launched can be configured via the
         `editor.command` config option.
         """
         tab = self._current_widget()
-        tab.elements.find_focused(self._open_editor_cb)
+        tab.elements.find_focused(self._edit_text_cb)
 
     def on_file_updated(self, ed, elem, text):
         """Write the editor text into the form field and clean up tempfile.
@@ -1522,8 +1552,8 @@ class CommandDispatcher:
             elif going_up and tab.scroller.pos_px().y() > old_scroll_pos.y():
                 message.info("Search hit TOP, continuing at BOTTOM")
         else:
-            message.warning("Text '{}' not found on page!".format(text),
-                            replace=True)
+            message.warning(f"Text '{text}' not found on page!",
+                            replace='find-in-page')
 
     @cmdutils.register(instance='command-dispatcher', scope='window',
                        maxsplit=0)

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2018-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """A Chromium-like URL matching pattern.
 
@@ -104,7 +104,14 @@ class UrlPattern:
         self._init_path(parsed)
         self._init_port(parsed)
 
-    def _to_tuple(self) -> Tuple:
+    def _to_tuple(self) -> Tuple[
+        bool,  # _match_all
+        bool,  # _match_subdomains
+        Optional[str],  # _scheme
+        Optional[str],  # host
+        Optional[str],  # _path
+        Optional[int],  # _port
+    ]:
         """Get a pattern with information used for __eq__/__hash__."""
         return (self._match_all, self._match_subdomains, self._scheme,
                 self.host, self._path, self._port)
@@ -125,7 +132,7 @@ class UrlPattern:
 
     def _fixup_pattern(self, pattern: str) -> str:
         """Make sure the given pattern is parseable by urllib.parse."""
-        if pattern.startswith('*:'):  # Any scheme, but *:// is unparseable
+        if pattern.startswith('*:'):  # Any scheme, but *:// is unparsable
             pattern = 'any:' + pattern[2:]
 
         schemes = tuple(s + ':' for s in self._SCHEMES_WITHOUT_HOST)

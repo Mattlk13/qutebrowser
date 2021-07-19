@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,12 +15,13 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The main statusbar widget."""
 
 import enum
-import attr
+import dataclasses
+
 from PyQt5.QtCore import (pyqtSignal, pyqtSlot,  # type: ignore[attr-defined]
                           pyqtProperty, Qt, QSize, QTimer)
 from PyQt5.QtWidgets import QWidget, QHBoxLayout, QStackedLayout, QSizePolicy
@@ -34,7 +35,7 @@ from qutebrowser.mainwindow.statusbar import (backforward, command, progress,
                                               tabindex, textbase)
 
 
-@attr.s
+@dataclasses.dataclass
 class ColorFlags:
 
     """Flags which change the appearance of the statusbar.
@@ -56,12 +57,12 @@ class ColorFlags:
         on = enum.auto()
         selection = enum.auto()
 
-    prompt = attr.ib(False)
-    insert = attr.ib(False)
-    command = attr.ib(False)
-    caret = attr.ib(CaretMode.off)
-    private = attr.ib(False)
-    passthrough = attr.ib(False)
+    prompt: bool = False
+    insert: bool = False
+    command: bool = False
+    caret: CaretMode = CaretMode.off
+    private: bool = False
+    passthrough: bool = False
 
     def to_stringlist(self):
         """Get a string list of set flags used in the stylesheet.
@@ -199,6 +200,7 @@ class StatusBar(QWidget):
         self.tabindex = tabindex.TabIndex()
         self.keystring = keystring.KeyString()
         self.prog = progress.Progress(self)
+        self._text_widgets = []
         self._draw_widgets()
 
         config.instance.changed.connect(self._on_config_changed)
@@ -218,13 +220,7 @@ class StatusBar(QWidget):
 
     def _draw_widgets(self):
         """Draw statusbar widgets."""
-        # Start with widgets hidden and show them when needed
-        for widget in [self.url, self.percentage,
-                       self.backforward, self.tabindex,
-                       self.keystring, self.prog]:
-            assert isinstance(widget, QWidget)
-            widget.hide()
-            self._hbox.removeWidget(widget)
+        self._clear_widgets()
 
         tab = self._current_tab()
 
@@ -256,6 +252,25 @@ class StatusBar(QWidget):
                 self.prog.enabled = True
                 if tab:
                     self.prog.on_tab_changed(tab)
+            elif segment.startswith('text:'):
+                cur_widget = textbase.TextBase()
+                self._text_widgets.append(cur_widget)
+                cur_widget.setText(segment.split(':', maxsplit=1)[1])
+                self._hbox.addWidget(cur_widget)
+                cur_widget.show()
+            else:
+                raise utils.Unreachable(segment)
+
+    def _clear_widgets(self):
+        """Clear widgets before redrawing them."""
+        # Start with widgets hidden and show them when needed
+        for widget in [self.url, self.percentage,
+                       self.backforward, self.tabindex,
+                       self.keystring, self.prog, *self._text_widgets]:
+            assert isinstance(widget, QWidget)
+            widget.hide()
+            self._hbox.removeWidget(widget)
+        self._text_widgets.clear()
 
     @pyqtSlot()
     def maybe_hide(self):
@@ -326,7 +341,7 @@ class StatusBar(QWidget):
         if mode == 'passthrough':
             key_instance = config.key_instance
             all_bindings = key_instance.get_reverse_bindings_for('passthrough')
-            bindings = all_bindings.get('leave-mode')
+            bindings = all_bindings.get('mode-leave')
             if bindings:
                 suffix = ' ({} to leave)'.format(' or '.join(bindings))
             else:

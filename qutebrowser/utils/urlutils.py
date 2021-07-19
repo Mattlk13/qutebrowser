@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Utils regarding URL handling."""
 
@@ -25,7 +25,8 @@ import os.path
 import ipaddress
 import posixpath
 import urllib.parse
-from typing import Optional, Tuple, Union
+import mimetypes
+from typing import Optional, Tuple, Union, Iterable
 
 from PyQt5.QtCore import QUrl
 from PyQt5.QtNetwork import QHostInfo, QHostAddress, QNetworkProxy
@@ -393,24 +394,34 @@ def get_path_if_valid(pathstr: str,
     return path
 
 
-def filename_from_url(url: QUrl) -> Optional[str]:
+def filename_from_url(url: QUrl, fallback: str = None) -> Optional[str]:
     """Get a suitable filename from a URL.
 
     Args:
         url: The URL to parse, as a QUrl.
+        fallback: Value to use if no name can be determined.
 
     Return:
         The suggested filename as a string, or None.
     """
     if not url.isValid():
-        return None
+        return fallback
+
+    if url.scheme().lower() == 'data':
+        mimetype, _encoding = mimetypes.guess_type(url.toString())
+        if not mimetype:
+            return fallback
+
+        ext = utils.mimetype_extension(mimetype) or ''
+        return 'download' + ext
+
     pathname = posixpath.basename(url.path())
     if pathname:
         return pathname
     elif url.host():
         return url.host() + '.html'
     else:
-        return None
+        return fallback
 
 
 HostTupleType = Tuple[str, str, int]
@@ -467,11 +478,18 @@ def same_domain(url1: QUrl, url2: QUrl) -> bool:
     For example example.com and www.example.com are considered the same. but
     example.co.uk and test.co.uk are not.
 
+    If the URL's schemes or ports are different, they are always treated as not equal.
+
     Return:
         True if the domains are the same, False otherwise.
     """
     ensure_valid(url1)
     ensure_valid(url2)
+
+    if url1.scheme() != url2.scheme():
+        return False
+    if url1.port() != url2.port():
+        return False
 
     suffix1 = url1.topLevelDomain()
     suffix2 = url2.topLevelDomain()
@@ -601,3 +619,12 @@ def parse_javascript_url(url: QUrl) -> str:
         raise Error("Resulted in empty JavaScript code")
 
     return code
+
+
+def widened_hostnames(hostname: str) -> Iterable[str]:
+    """A generator for widening string hostnames.
+
+    Ex: a.c.foo -> [a.c.foo, c.foo, foo]"""
+    while hostname:
+        yield hostname
+        hostname = hostname.partition(".")[-1]

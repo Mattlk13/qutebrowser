@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2018-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Loader for qutebrowser extensions."""
 
@@ -25,9 +25,8 @@ import sys
 import pathlib
 import importlib
 import argparse
+import dataclasses
 from typing import Callable, Iterator, List, Optional, Set, Tuple
-
-import attr
 
 from PyQt5.QtCore import pyqtSlot
 
@@ -40,18 +39,21 @@ from qutebrowser.misc import objects
 # ModuleInfo objects for all loaded plugins
 _module_infos = []
 
+InitHookType = Callable[['InitContext'], None]
+ConfigChangedHookType = Callable[[], None]
 
-@attr.s
+
+@dataclasses.dataclass
 class InitContext:
 
     """Context an extension gets in its init hook."""
 
-    data_dir: pathlib.Path = attr.ib()
-    config_dir: pathlib.Path = attr.ib()
-    args: argparse.Namespace = attr.ib()
+    data_dir: pathlib.Path
+    config_dir: pathlib.Path
+    args: argparse.Namespace
 
 
-@attr.s
+@dataclasses.dataclass
 class ModuleInfo:
 
     """Information attached to an extension module.
@@ -59,19 +61,22 @@ class ModuleInfo:
     This gets used by qutebrowser.api.hook.
     """
 
-    _ConfigChangedHooksType = List[Tuple[Optional[str], Callable]]
+    skip_hooks: bool = False
+    init_hook: Optional[InitHookType] = None
+    config_changed_hooks: List[
+        Tuple[
+            Optional[str],
+            ConfigChangedHookType,
+        ]
+    ] = dataclasses.field(default_factory=list)
 
-    skip_hooks: bool = attr.ib(False)
-    init_hook: Optional[Callable] = attr.ib(None)
-    config_changed_hooks: _ConfigChangedHooksType = attr.ib(attr.Factory(list))
 
-
-@attr.s
+@dataclasses.dataclass
 class ExtensionInfo:
 
     """Information about a qutebrowser extension."""
 
-    name: str = attr.ib()
+    name: str
 
 
 def add_module_info(module: types.ModuleType) -> ModuleInfo:
@@ -110,6 +115,11 @@ def _walk_normal() -> Iterator[ExtensionInfo]:
             onerror=_on_walk_error):
         if ispkg:
             continue
+        if name == 'qutebrowser.components.adblock':
+            # WORKAROUND for packaging issues where the old adblock.py file is still
+            # lingering around.
+            log.extensions.debug("Ignoring stale 'adblock' component")
+            continue
         yield ExtensionInfo(name=name)
 
 
@@ -124,7 +134,7 @@ def _walk_pyinstaller() -> Iterator[ExtensionInfo]:
     toc: Set[str] = set()
     for importer in pkgutil.iter_importers('qutebrowser'):
         if hasattr(importer, 'toc'):
-            toc |= importer.toc
+            toc |= importer.toc  # type: ignore[union-attr]
     for name in toc:
         if name.startswith(components.__name__ + '.'):
             yield ExtensionInfo(name=name)

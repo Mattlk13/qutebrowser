@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The main browser widgets."""
 
@@ -30,7 +30,7 @@ from PyQt5.QtWidgets import QFileDialog
 from PyQt5.QtPrintSupport import QPrintDialog
 from PyQt5.QtWebKitWidgets import QWebPage, QWebFrame
 
-from qutebrowser.config import websettings
+from qutebrowser.config import websettings, config
 from qutebrowser.browser import pdfjs, shared, downloads, greasemonkey
 from qutebrowser.browser.webkit import http
 from qutebrowser.browser.webkit.network import networkmanager
@@ -192,6 +192,19 @@ class BrowserPage(QWebPage):
             errpage.encoding = 'utf-8'
             return True
 
+    def chooseFile(self, parent_frame: QWebFrame, suggested_file: str) -> str:
+        """Override chooseFile to (optionally) invoke custom file uploader."""
+        handler = config.val.fileselect.handler
+        if handler == "default":
+            return super().chooseFile(parent_frame, suggested_file)
+
+        assert handler == "external", handler
+        selected = shared.choose_file(qb_mode=shared.FileSelectionMode.single_file)
+        if not selected:
+            return ''
+        else:
+            return selected[0]
+
     def _handle_multiple_files(self, info, files):
         """Handle uploading of multiple files.
 
@@ -205,13 +218,18 @@ class BrowserPage(QWebPage):
         Return:
             True on success, the superclass return value on failure.
         """
-        suggested_file = ""
-        if info.suggestedFileNames:
-            suggested_file = info.suggestedFileNames[0]
+        handler = config.val.fileselect.handler
+        if handler == "default":
+            suggested_file = ""
+            if info.suggestedFileNames:
+                suggested_file = info.suggestedFileNames[0]
 
-        files.fileNames, _ = QFileDialog.getOpenFileNames(
-            None, None, suggested_file)  # type: ignore[arg-type]
+            files.fileNames, _ = QFileDialog.getOpenFileNames(
+                None, None, suggested_file)  # type: ignore[arg-type]
+            return True
 
+        assert handler == "external", handler
+        files.fileNames = shared.choose_file(shared.FileSelectionMode.multiple_files)
         return True
 
     def shutdown(self):
@@ -256,7 +274,7 @@ class BrowserPage(QWebPage):
         correct for some common errors the server do.
 
         At some point we might want to implement the MIME Sniffing standard
-        here: http://mimesniff.spec.whatwg.org/
+        here: https://mimesniff.spec.whatwg.org/
         """
         inline, suggested_filename = http.parse_content_disposition(reply)
         download_manager = objreg.get('qtnetwork-download-manager')
@@ -325,7 +343,7 @@ class BrowserPage(QWebPage):
 
         for script in toload:
             if frame is self.mainFrame() or script.runs_on_sub_frames:
-                log.webview.debug('Running GM script: {}'.format(script.name))
+                log.webview.debug(f'Running GM script: {script}')
                 frame.evaluateJavaScript(script.code())
 
     @pyqtSlot('QWebFrame*', 'QWebPage::Feature')
@@ -339,7 +357,7 @@ class BrowserPage(QWebPage):
             return
 
         options = {
-            QWebPage.Notifications: 'content.notifications',
+            QWebPage.Notifications: 'content.notifications.enabled',
             QWebPage.Geolocation: 'content.geolocation',
         }
         messages = {

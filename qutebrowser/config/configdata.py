@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Configuration data for config.py.
 
@@ -27,10 +27,10 @@ DATA: A dict of Option objects after init() has been called.
 from typing import (Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
                     Sequence, Tuple, Union, cast)
 import functools
+import dataclasses
 
-import attr
 from qutebrowser.config import configtypes
-from qutebrowser.utils import usertypes, qtutils, utils
+from qutebrowser.utils import usertypes, qtutils, utils, resources
 from qutebrowser.misc import debugcachestats
 
 DATA = cast(Mapping[str, 'Option'], None)
@@ -39,7 +39,7 @@ MIGRATIONS = cast('Migrations', None)
 _BackendDict = Mapping[str, Union[str, bool]]
 
 
-@attr.s
+@dataclasses.dataclass(order=True)
 class Option:
 
     """Description of an Option in the config.
@@ -47,18 +47,18 @@ class Option:
     Note that this is just an option which exists, with no value associated.
     """
 
-    name: str = attr.ib()
-    typ: configtypes.BaseType = attr.ib()
-    default: Any = attr.ib()
-    backends: Iterable[usertypes.Backend] = attr.ib()
-    raw_backends: Optional[Mapping[str, bool]] = attr.ib()
-    description: str = attr.ib()
-    supports_pattern: bool = attr.ib(default=False)
-    restart: bool = attr.ib(default=False)
-    no_autoconfig: bool = attr.ib(default=False)
+    name: str
+    typ: configtypes.BaseType
+    default: Any
+    backends: Iterable[usertypes.Backend]
+    raw_backends: Optional[Mapping[str, bool]]
+    description: str
+    supports_pattern: bool = False
+    restart: bool = False
+    no_autoconfig: bool = False
 
 
-@attr.s
+@dataclasses.dataclass
 class Migrations:
 
     """Migrated options in configdata.yml.
@@ -68,8 +68,8 @@ class Migrations:
         deleted: A list of option names which have been removed.
     """
 
-    renamed: Dict[str, str] = attr.ib(default=attr.Factory(dict))
-    deleted: List[str] = attr.ib(default=attr.Factory(list))
+    renamed: Dict[str, str] = dataclasses.field(default_factory=dict)
+    deleted: List[str] = dataclasses.field(default_factory=list)
 
 
 def _raise_invalid_node(name: str, what: str, node: Any) -> None:
@@ -272,4 +272,4 @@ def is_valid_prefix(prefix: str) -> bool:
 def init() -> None:
     """Initialize configdata from the YAML file."""
     global DATA, MIGRATIONS
-    DATA, MIGRATIONS = _read_yaml(utils.read_file('config/configdata.yml'))
+    DATA, MIGRATIONS = _read_yaml(resources.read_file('config/configdata.yml'))

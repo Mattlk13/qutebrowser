@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Our own QKeySequence-like class and related utilities.
 
@@ -32,9 +32,9 @@ handle what we actually think we do.
 """
 
 import itertools
+import dataclasses
 from typing import cast, overload, Iterable, Iterator, List, Mapping, Optional, Union
 
-import attr
 from PyQt5.QtCore import Qt, QEvent
 from PyQt5.QtGui import QKeySequence, QKeyEvent
 
@@ -319,6 +319,7 @@ def _parse_special_key(keystr: str) -> str:
         ('mod4', 'meta'),
         ('command', 'meta'),
         ('cmd', 'meta'),
+        ('super', 'meta'),
         ('mod1', 'alt'),
         ('less', '<'),
         ('greater', '>'),
@@ -336,7 +337,7 @@ def _parse_single_key(keystr: str) -> str:
     return 'Shift+' + keystr if keystr.isupper() else keystr
 
 
-@attr.s(frozen=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class KeyInfo:
 
     """A key with optional modifiers.
@@ -346,8 +347,8 @@ class KeyInfo:
         modifiers: A Qt::KeyboardModifiers enum value.
     """
 
-    key: Qt.Key = attr.ib()
-    modifiers: _ModifierType = attr.ib()
+    key: Qt.Key
+    modifiers: _ModifierType
 
     @classmethod
     def from_event(cls, e: QKeyEvent) -> 'KeyInfo':
@@ -457,7 +458,7 @@ class KeySequence:
             assert self
         self._validate()
 
-    def _convert_key(self, key: Qt.Key) -> int:
+    def _convert_key(self, key: Union[int, Qt.KeyboardModifiers]) -> int:
         """Convert a single key for QKeySequence."""
         assert isinstance(key, (int, Qt.KeyboardModifiers)), key
         return int(key)
@@ -611,6 +612,22 @@ class KeySequence:
                 not ev.text().isupper()):
             modifiers = Qt.KeyboardModifiers()  # type: ignore[assignment]
 
+        # On macOS, swap Ctrl and Meta back
+        #
+        # We don't use Qt.AA_MacDontSwapCtrlAndMeta because that also affects
+        # Qt/QtWebEngine's own shortcuts. However, we do want "Ctrl" and "Meta"
+        # (or "Cmd") in a key binding name to actually represent what's on the
+        # keyboard.
+        if utils.is_mac:
+            if modifiers & Qt.ControlModifier and modifiers & Qt.MetaModifier:
+                pass
+            elif modifiers & Qt.ControlModifier:
+                modifiers &= ~Qt.ControlModifier
+                modifiers |= Qt.MetaModifier
+            elif modifiers & Qt.MetaModifier:
+                modifiers &= ~Qt.MetaModifier
+                modifiers |= Qt.ControlModifier
+
         keys = list(self._iter_keys())
         keys.append(key | int(modifiers))
 
@@ -631,10 +648,9 @@ class KeySequence:
         for key in self._iter_keys():
             key_seq = KeySequence(key)
             if key_seq in mappings:
-                new_seq = mappings[key_seq]
-                assert len(new_seq) == 1
-                key = new_seq[0].to_int()
-            keys.append(key)
+                keys += [info.to_int() for info in mappings[key_seq]]
+            else:
+                keys.append(key)
         return self.__class__(*keys)
 
     @classmethod

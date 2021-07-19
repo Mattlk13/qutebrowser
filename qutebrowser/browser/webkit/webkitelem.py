@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """QtWebKit specific part of the web element API."""
 
@@ -380,7 +380,7 @@ class WebKitElement(webelem.AbstractWebElement):
 def get_child_frames(startframe: QWebFrame) -> List[QWebFrame]:
     """Get all children recursively of a given QWebFrame.
 
-    Loosely based on http://blog.nextgenetics.net/?e=64
+    Loosely based on https://blog.nextgenetics.net/?e=64
 
     Args:
         startframe: The QWebFrame to start with.

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2018-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Tests for caret browsing mode."""
 
@@ -107,7 +107,7 @@ def test_selection_callback_wrong_mode(qtbot, caplog,
     async callback was happening, so we don't want to mess with the status bar.
     """
     assert mode_manager.mode == usertypes.KeyMode.normal
-    with qtbot.assertNotEmitted(webengine_tab.caret.selection_toggled):
+    with qtbot.assert_not_emitted(webengine_tab.caret.selection_toggled):
         webengine_tab.caret._toggle_sel_translate('normal')
 
     msg = 'Ignoring caret selection callback in KeyMode.normal'

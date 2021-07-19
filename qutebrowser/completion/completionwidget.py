@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Completion view for statusbar command section.
 
@@ -138,7 +138,7 @@ class CompletionView(QTreeView):
         # This is a workaround for weird race conditions with invalid
         # item indexes leading to segfaults in Qt.
         #
-        # Some background: http://bugs.quassel-irc.org/issues/663
+        # Some background: https://bugs.quassel-irc.org/issues/663
         # The proposed fix there was later reverted because it didn't help.
         self.setUniformRowHeights(True)
         self.hide()
@@ -331,7 +331,8 @@ class CompletionView(QTreeView):
             QItemSelectionModel.Rows)
 
         # if the last item is focused, try to fetch more
-        if idx.row() == self.model().rowCount(idx.parent()) - 1:
+        next_idx = self.indexBelow(idx)
+        if not self.visualRect(next_idx).isValid():
             self.expandAll()
 
         count = self.model().count()

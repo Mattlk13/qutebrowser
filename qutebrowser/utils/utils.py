@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Other utilities which don't fit anywhere else."""
 
@@ -30,18 +30,24 @@ import datetime
 import traceback
 import functools
 import contextlib
-import posixpath
 import shlex
-import glob
 import mimetypes
-import ctypes
-import ctypes.util
-from typing import Any, Callable, IO, Iterator, Optional, Sequence, Tuple, Type, Union
+from typing import (Any, Callable, IO, Iterator,
+                    Optional, Sequence, Tuple, Type, Union,
+                    TypeVar, TYPE_CHECKING)
+try:
+    # Protocol was added in Python 3.8
+    from typing import Protocol
+except ImportError:  # pragma: no cover
+    if not TYPE_CHECKING:
+        class Protocol:
 
-from PyQt5.QtCore import QUrl
-from PyQt5.QtGui import QColor, QClipboard, QDesktopServices
+            """Empty stub at runtime."""
+
+from PyQt5.QtCore import QUrl, QVersionNumber, QRect
+from PyQt5.QtGui import QClipboard, QDesktopServices
 from PyQt5.QtWidgets import QApplication
-import pkg_resources
+
 import yaml
 try:
     from yaml import (CSafeLoader as YamlLoader,
@@ -52,18 +58,96 @@ except ImportError:  # pragma: no cover
                       SafeDumper as YamlDumper)
     YAML_C_EXT = False
 
-import qutebrowser
-from qutebrowser.utils import qtutils, log
-
+from qutebrowser.utils import log
 
 fake_clipboard = None
 log_clipboard = False
-_resource_cache = {}
 
 is_mac = sys.platform.startswith('darwin')
 is_linux = sys.platform.startswith('linux')
 is_windows = sys.platform.startswith('win')
 is_posix = os.name == 'posix'
+
+_C = TypeVar("_C", bound="Comparable")
+
+
+class Comparable(Protocol):
+
+    """Protocol for a "comparable" object."""
+
+    def __lt__(self: _C, other: _C) -> bool:
+        ...
+
+    def __ge__(self: _C, other: _C) -> bool:
+        ...
+
+
+class VersionNumber:
+
+    """A representation of a version number."""
+
+    def __init__(self, *args: int) -> None:
+        self._ver = QVersionNumber(args)  # not *args, to support >3 components
+        if self._ver.isNull():
+            raise ValueError("Can't construct a null version")
+
+        normalized = self._ver.normalized()
+        if normalized != self._ver:
+            raise ValueError(
+                f"Refusing to construct non-normalized version from {args} "
+                f"(normalized: {tuple(normalized.segments())}).")
+
+        self.major = self._ver.majorVersion()
+        self.minor = self._ver.minorVersion()
+        self.patch = self._ver.microVersion()
+        self.segments = self._ver.segments()
+
+    def __str__(self) -> str:
+        return ".".join(str(s) for s in self.segments)
+
+    def __repr__(self) -> str:
+        args = ", ".join(str(s) for s in self.segments)
+        return f'VersionNumber({args})'
+
+    def strip_patch(self) -> 'VersionNumber':
+        """Get a new VersionNumber with the patch version removed."""
+        return VersionNumber(*self.segments[:2])
+
+    @classmethod
+    def parse(cls, s: str) -> 'VersionNumber':
+        """Parse a version number from a string."""
+        ver, _suffix = QVersionNumber.fromString(s)
+        # FIXME: Should we support a suffix?
+
+        if ver.isNull():
+            raise ValueError(f"Failed to parse {s}")
+
+        return cls(*ver.normalized().segments())
+
+    def __hash__(self) -> int:
+        return hash(self._ver)
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, VersionNumber):
+            return NotImplemented
+        return self._ver == other._ver
+
+    def __ne__(self, other: object) -> bool:
+        if not isinstance(other, VersionNumber):
+            return NotImplemented
+        return self._ver != other._ver
+
+    def __ge__(self, other: 'VersionNumber') -> bool:
+        return self._ver >= other._ver  # type: ignore[operator]
+
+    def __gt__(self, other: 'VersionNumber') -> bool:
+        return self._ver > other._ver  # type: ignore[operator]
+
+    def __le__(self, other: 'VersionNumber') -> bool:
+        return self._ver <= other._ver  # type: ignore[operator]
+
+    def __lt__(self, other: 'VersionNumber') -> bool:
+        return self._ver < other._ver  # type: ignore[operator]
 
 
 class Unreachable(Exception):
@@ -148,143 +232,6 @@ def compact_text(text: str, elidelength: int = None) -> str:
     return out
 
 
-def preload_resources() -> None:
-    """Load resource files into the cache."""
-    for subdir, pattern in [('html', '*.html'), ('javascript', '*.js')]:
-        path = resource_filename(subdir)
-        for full_path in glob.glob(os.path.join(path, pattern)):
-            sub_path = '/'.join([subdir, os.path.basename(full_path)])
-            _resource_cache[sub_path] = read_file(sub_path)
-
-
-# FIXME:typing Return value should be bytes/str
-def read_file(filename: str, binary: bool = False) -> Any:
-    """Get the contents of a file contained with qutebrowser.
-
-    Args:
-        filename: The filename to open as string.
-        binary: Whether to return a binary string.
-                If False, the data is UTF-8-decoded.
-
-    Return:
-        The file contents as string.
-    """
-    assert not posixpath.isabs(filename), filename
-    assert os.path.pardir not in filename.split(posixpath.sep), filename
-
-    if not binary and filename in _resource_cache:
-        return _resource_cache[filename]
-
-    if hasattr(sys, 'frozen'):
-        # PyInstaller doesn't support pkg_resources :(
-        # https://github.com/pyinstaller/pyinstaller/wiki/FAQ#misc
-        fn = os.path.join(os.path.dirname(sys.executable), filename)
-        if binary:
-            f: IO
-            with open(fn, 'rb') as f:
-                return f.read()
-        else:
-            with open(fn, 'r', encoding='utf-8') as f:
-                return f.read()
-    else:
-        data = pkg_resources.resource_string(
-            qutebrowser.__name__, filename)
-
-        if binary:
-            return data
-
-        return data.decode('UTF-8')
-
-
-def resource_filename(filename: str) -> str:
-    """Get the absolute filename of a file contained with qutebrowser.
-
-    Args:
-        filename: The filename.
-
-    Return:
-        The absolute filename.
-    """
-    if hasattr(sys, 'frozen'):
-        return os.path.join(os.path.dirname(sys.executable), filename)
-    return pkg_resources.resource_filename(qutebrowser.__name__, filename)
-
-
-def _get_color_percentage(x1: int, y1: int, z1: int, a1: int,
-                          x2: int, y2: int, z2: int, a2: int,
-                          percent: int) -> Tuple[int, int, int, int]:
-    """Get a color which is percent% interpolated between start and end.
-
-    Args:
-        x1, y1, z1, a1 : Start color components (R, G, B, A / H, S, V, A / H, S, L, A)
-        x2, y2, z2, a2 : End color components (R, G, B, A / H, S, V, A / H, S, L, A)
-        percent: Percentage to interpolate, 0-100.
-                 0: Start color will be returned.
-                 100: End color will be returned.
-
-    Return:
-        A (x, y, z, alpha) tuple with the interpolated color components.
-    """
-    if not 0 <= percent <= 100:
-        raise ValueError("percent needs to be between 0 and 100!")
-    x = round(x1 + (x2 - x1) * percent / 100)
-    y = round(y1 + (y2 - y1) * percent / 100)
-    z = round(z1 + (z2 - z1) * percent / 100)
-    a = round(a1 + (a2 - a1) * percent / 100)
-    return (x, y, z, a)
-
-
-def interpolate_color(
-        start: QColor,
-        end: QColor,
-        percent: int,
-        colorspace: Optional[QColor.Spec] = QColor.Rgb
-) -> QColor:
-    """Get an interpolated color value.
-
-    Args:
-        start: The start color.
-        end: The end color.
-        percent: Which value to get (0 - 100)
-        colorspace: The desired interpolation color system,
-                    QColor::{Rgb,Hsv,Hsl} (from QColor::Spec enum)
-                    If None, start is used except when percent is 100.
-
-    Return:
-        The interpolated QColor, with the same spec as the given start color.
-    """
-    qtutils.ensure_valid(start)
-    qtutils.ensure_valid(end)
-
-    if colorspace is None:
-        if percent == 100:
-            return QColor(*end.getRgb())
-        else:
-            return QColor(*start.getRgb())
-
-    out = QColor()
-    if colorspace == QColor.Rgb:
-        r1, g1, b1, a1 = start.getRgb()
-        r2, g2, b2, a2 = end.getRgb()
-        components = _get_color_percentage(r1, g1, b1, a1, r2, g2, b2, a2, percent)
-        out.setRgb(*components)
-    elif colorspace == QColor.Hsv:
-        h1, s1, v1, a1 = start.getHsv()
-        h2, s2, v2, a2 = end.getHsv()
-        components = _get_color_percentage(h1, s1, v1, a1, h2, s2, v2, a2, percent)
-        out.setHsv(*components)
-    elif colorspace == QColor.Hsl:
-        h1, s1, l1, a1 = start.getHsl()
-        h2, s2, l2, a2 = end.getHsl()
-        components = _get_color_percentage(h1, s1, l1, a1, h2, s2, l2, a2, percent)
-        out.setHsl(*components)
-    else:
-        raise ValueError("Invalid colorspace!")
-    out = out.convertTo(start.spec())
-    qtutils.ensure_valid(out)
-    return out
-
-
 def format_seconds(total_seconds: int) -> str:
     """Format a count of seconds to get a [H:]M:SS string."""
     prefix = '-' if total_seconds < 0 else ''
@@ -304,7 +251,7 @@ def format_seconds(total_seconds: int) -> str:
 def format_size(size: Optional[float], base: int = 1024, suffix: str = '') -> str:
     """Format a byte size so it's human readable.
 
-    Inspired by http://stackoverflow.com/q/1094841
+    Inspired by https://stackoverflow.com/q/1094841
     """
     prefixes = ['', 'k', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y']
     if size is None:
@@ -394,7 +341,7 @@ class prevent_exceptions:  # noqa: N801,N806 pylint: disable=invalid-name
         self._retval = retval
         self._predicate = predicate
 
-    def __call__(self, func: Callable) -> Callable:
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
         """Called when a function should be decorated.
 
         Args:
@@ -482,7 +429,7 @@ def qualname(obj: Any) -> str:
 _ExceptionType = Union[Type[BaseException], Tuple[Type[BaseException]]]
 
 
-def raises(exc: _ExceptionType, func: Callable, *args: Any) -> bool:
+def raises(exc: _ExceptionType, func: Callable[..., Any], *args: Any) -> bool:
     """Check if a function raises a given exception.
 
     Args:
@@ -656,7 +603,7 @@ def open_file(filename: str, cmdline: str = None) -> None:
     # if we want to use the default
     override = config.val.downloads.open_dispatcher
 
-    if version.is_sandboxed():
+    if version.is_flatpak():
         if cmdline:
             message.error("Cannot spawn download dispatcher from sandbox")
             return
@@ -760,7 +707,10 @@ def yaml_dump(data: Any, f: IO[str] = None) -> Optional[str]:
         return yaml_data.decode('utf-8')
 
 
-def chunk(elems: Sequence, n: int) -> Iterator[Sequence]:
+_T = TypeVar('_T')
+
+
+def chunk(elems: Sequence[_T], n: int) -> Iterator[Sequence[_T]]:
     """Yield successive n-sized chunks from elems.
 
     If elems % n != 0, the last chunk will be smaller.
@@ -802,14 +752,107 @@ def ceil_log(number: int, base: int) -> int:
     return result
 
 
-def libgl_workaround() -> None:
-    """Work around QOpenGLShaderProgram issues, especially for Nvidia.
+def parse_duration(duration: str) -> int:
+    """Parse duration in format XhYmZs into milliseconds duration."""
+    if duration.isdigit():
+        # For backward compatibility return milliseconds
+        return int(duration)
 
-    See https://bugs.launchpad.net/ubuntu/+source/python-qt4/+bug/941826
+    match = re.fullmatch(
+        r'(?P<hours>[0-9]+(\.[0-9])?h)?\s*'
+        r'(?P<minutes>[0-9]+(\.[0-9])?m)?\s*'
+        r'(?P<seconds>[0-9]+(\.[0-9])?s)?',
+        duration
+    )
+    if not match or not match.group(0):
+        raise ValueError(
+            f"Invalid duration: {duration} - "
+            "expected XhYmZs or a number of milliseconds"
+        )
+    seconds_string = match.group('seconds') if match.group('seconds') else '0'
+    seconds = float(seconds_string.rstrip('s'))
+    minutes_string = match.group('minutes') if match.group('minutes') else '0'
+    minutes = float(minutes_string.rstrip('m'))
+    hours_string = match.group('hours') if match.group('hours') else '0'
+    hours = float(hours_string.rstrip('h'))
+    milliseconds = int((seconds + minutes * 60 + hours * 3600) * 1000)
+    return milliseconds
+
+
+def mimetype_extension(mimetype: str) -> Optional[str]:
+    """Get a suitable extension for a given mimetype.
+
+    This mostly delegates to Python's mimetypes.guess_extension(), but backports some
+    changes (via a simple override dict) which are missing from earlier Python versions.
+    Most likely, this can be dropped once the minimum Python version is raised to 3.7.
     """
-    if os.environ.get('QUTE_SKIP_LIBGL_WORKAROUND'):
-        return
+    overrides = {
+        # Added around 3.8
+        "application/manifest+json": ".webmanifest",
+        "application/x-hdf5": ".h5",
 
-    libgl = ctypes.util.find_library("GL")
-    if libgl is not None:  # pragma: no branch
-        ctypes.CDLL(libgl, mode=ctypes.RTLD_GLOBAL)
+        # Added in Python 3.7
+        "application/wasm": ".wasm",
+
+        # Wrong values for Python 3.6
+        # https://bugs.python.org/issue1043134
+        # https://github.com/python/cpython/pull/14375
+        "application/octet-stream": ".bin",  # not .a
+        "application/postscript": ".ps",  # not .ai
+        "application/vnd.ms-excel": ".xls",  # not .xlb
+        "application/vnd.ms-powerpoint": ".ppt",  # not .pot
+        "application/xml": ".xsl",  # not .rdf
+        "audio/mpeg": ".mp3",  # not .mp2
+        "image/jpeg": ".jpg",  # not .jpe
+        "image/tiff": ".tiff",  # not .tif
+        "text/html": ".html",  # not .htm
+        "text/plain": ".txt",  # not .bat
+        "video/mpeg": ".mpeg",  # not .m1v
+    }
+    if mimetype in overrides:
+        return overrides[mimetype]
+    return mimetypes.guess_extension(mimetype, strict=False)
+
+
+@contextlib.contextmanager
+def cleanup_file(filepath: str) -> Iterator[None]:
+    """Context that deletes a file upon exit or error.
+
+    Args:
+        filepath: The file path
+    """
+    try:
+        yield
+    finally:
+        try:
+            os.remove(filepath)
+        except OSError as e:
+            log.misc.error(f"Failed to delete tempfile {filepath} ({e})!")
+
+
+_RECT_PATTERN = re.compile(r'(?P<w>\d+)x(?P<h>\d+)\+(?P<x>\d+)\+(?P<y>\d+)')
+
+
+def parse_rect(s: str) -> QRect:
+    """Parse a rectangle string like 20x20+5+3.
+
+    Negative offsets aren't supported, and neither is leaving off parts of the string.
+    """
+    match = _RECT_PATTERN.match(s)
+    if not match:
+        raise ValueError(f"String {s} does not match WxH+X+Y")
+
+    w = int(match.group('w'))
+    h = int(match.group('h'))
+    x = int(match.group('x'))
+    y = int(match.group('y'))
+
+    try:
+        rect = QRect(x, y, w, h)
+    except OverflowError as e:
+        raise ValueError(e)
+
+    if not rect.isValid():
+        raise ValueError("Invalid rectangle")
+
+    return rect

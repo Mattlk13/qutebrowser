@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Shared QtWebKit/QtWebEngine code for downloads."""
 
@@ -548,20 +548,18 @@ class AbstractDownloadItem(QObject):
             position: The color type requested, can be 'fg' or 'bg'.
         """
         assert position in ["fg", "bg"]
-        # pylint: disable=bad-config-option
         start = getattr(config.val.colors.downloads.start, position)
         stop = getattr(config.val.colors.downloads.stop, position)
         system = getattr(config.val.colors.downloads.system, position)
         error = getattr(config.val.colors.downloads.error, position)
-        # pylint: enable=bad-config-option
         if self.error_msg is not None:
             assert not self.successful
             return error
         elif self.stats.percentage() is None:
             return start
         else:
-            return utils.interpolate_color(start, stop,
-                                           self.stats.percentage(), system)
+            return qtutils.interpolate_color(
+                start, stop, self.stats.percentage(), system)
 
     def _do_cancel(self):
         """Actual cancel implementation."""
@@ -1291,7 +1289,7 @@ class TempDownloadManager:
 
     """Manager to handle temporary download files.
 
-    The downloads are downloaded to a temporary location and then openened with
+    The downloads are downloaded to a temporary location and then opened with
     the system standard application. The temporary files are deleted when
     qutebrowser is shutdown.
 

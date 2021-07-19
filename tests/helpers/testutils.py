@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2015-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2015-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Various utilities used inside tests."""
 
@@ -32,17 +32,30 @@ import importlib.machinery
 import pytest
 
 from PyQt5.QtCore import qVersion
+from PyQt5.QtGui import QColor
 try:
     from PyQt5.QtWebEngine import PYQT_WEBENGINE_VERSION_STR
 except ImportError:
     PYQT_WEBENGINE_VERSION_STR = None
 
-from qutebrowser.utils import qtutils, log
+from qutebrowser.utils import qtutils, log, utils
 
 ON_CI = 'CI' in os.environ
 
+qt513 = pytest.mark.skipif(
+    not qtutils.version_check('5.13'), reason="Needs Qt 5.13 or newer")
 qt514 = pytest.mark.skipif(
     not qtutils.version_check('5.14'), reason="Needs Qt 5.14 or newer")
+
+
+class Color(QColor):
+
+    """A QColor with a nicer repr()."""
+
+    def __repr__(self):
+        return utils.get_repr(self, constructor=True, red=self.red(),
+                              green=self.green(), blue=self.blue(),
+                              alpha=self.alpha())
 
 
 class PartialCompareOutcome:
@@ -233,9 +246,25 @@ def ignore_bs4_warning():
         yield
 
 
+def _decompress_gzip_datafile(filename):
+    path = os.path.join(abs_datapath(), filename)
+    yield from io.TextIOWrapper(gzip.open(path), encoding="utf-8")
+
+
 def blocked_hosts():
-    path = os.path.join(abs_datapath(), 'blocked-hosts.gz')
-    yield from io.TextIOWrapper(gzip.open(path), encoding='utf-8')
+    return _decompress_gzip_datafile("blocked-hosts.gz")
+
+
+def adblock_dataset_tsv():
+    return _decompress_gzip_datafile("brave-adblock/ublock-matches.tsv.gz")
+
+
+def easylist_txt():
+    return _decompress_gzip_datafile("easylist.txt.gz")
+
+
+def easyprivacy_txt():
+    return _decompress_gzip_datafile("easyprivacy.txt.gz")
 
 
 def seccomp_args(qt_flag):

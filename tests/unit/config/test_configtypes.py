@@ -1,5 +1,5 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 
 # This file is part of qutebrowser.
 #
@@ -14,7 +14,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Tests for qutebrowser.config.configtypes."""
 
@@ -25,8 +25,8 @@ import math
 import warnings
 import inspect
 import functools
+import dataclasses
 
-import attr
 import pytest
 import hypothesis
 from hypothesis import strategies
@@ -39,7 +39,7 @@ from qutebrowser.config import configtypes, configexc
 from qutebrowser.utils import debug, utils, qtutils, urlmatch, usertypes
 from qutebrowser.browser.network import pac
 from qutebrowser.keyinput import keyutils
-from helpers import utils as testutils
+from helpers import testutils
 
 
 class Font(QFont):
@@ -138,10 +138,16 @@ class TestValidValues:
 
     def test_descriptions(self, klass):
         """Test descriptions."""
-        vv = klass(('foo', "foo desc"), ('bar', "bar desc"), 'baz')
-        assert vv.descriptions['foo'] == "foo desc"
-        assert vv.descriptions['bar'] == "bar desc"
-        assert 'baz' not in vv.descriptions
+        vv = klass(
+            ('one-with', "desc 1"),
+            ('two-with', "desc 2"),
+            'three-without',
+            ('four-without', None)
+        )
+        assert vv.descriptions['one-with'] == "desc 1"
+        assert vv.descriptions['two-with'] == "desc 2"
+        assert 'three-without' not in vv.descriptions
+        assert 'four-without' not in vv.descriptions
 
     @pytest.mark.parametrize('args, expected', [
         (['a', 'b'], "<qutebrowser.config.configtypes.ValidValues "
@@ -305,6 +311,18 @@ class TestAll:
             for value, _desc in completions:
                 typ.from_str(value)
 
+    def test_custom_completions(self, klass):
+        """Make sure we can pass custom completions."""
+        completions = [('1', 'one'), ('2', 'two')]
+        typ = klass(completions=completions)
+        assert typ.complete() == completions
+
+    def test_signature(self, klass):
+        """Make sure flag arguments are kw-only."""
+        sig = inspect.signature(klass)
+        for name in ['none_ok', 'completions']:
+            assert sig.parameters[name].kind == inspect.Parameter.KEYWORD_ONLY
+
 
 class TestBaseType:
 
@@ -396,13 +414,10 @@ class MappingSubclass(configtypes.MappingType):
     """A MappingType we use in TestMappingType which is valid/good."""
 
     MAPPING = {
-        'one': 1,
-        'two': 2,
+        'one': (1, 'one doc'),
+        'two': (2, 'two doc'),
+        'three': (3, None),
     }
-
-    def __init__(self, none_ok=False):
-        super().__init__(none_ok)
-        self.valid_values = configtypes.ValidValues('one', 'two')
 
 
 class TestMappingType:
@@ -429,11 +444,12 @@ class TestMappingType:
     def test_to_str(self, klass):
         assert klass().to_str('one') == 'one'
 
-    @pytest.mark.parametrize('typ', [configtypes.ColorSystem(),
-                                     configtypes.Position(),
-                                     configtypes.SelectOnRemove()])
-    def test_mapping_type_matches_valid_values(self, typ):
-        assert sorted(typ.MAPPING) == sorted(typ.valid_values)
+    def test_valid_values(self, klass):
+        assert klass().valid_values == configtypes.ValidValues(
+            ('one', 'one doc'),
+            ('two', 'two doc'),
+            ('three', None),
+        )
 
 
 class TestString:
@@ -530,8 +546,7 @@ class ListSubclass(configtypes.List):
             elemtype = configtypes.String(none_ok=none_ok_inner)
         super().__init__(elemtype, none_ok=none_ok_outer, length=length)
         if set_valid_values:
-            self.valtype.valid_values = configtypes.ValidValues(
-                'foo', 'bar', 'baz')
+            self.valtype.valid_values = configtypes.ValidValues('foo', 'bar', 'baz')
 
 
 class FlagListSubclass(configtypes.FlagList):
@@ -1346,14 +1361,14 @@ class TestQssColor:
             klass().to_py(val)
 
 
-@attr.s
+@dataclasses.dataclass
 class FontDesc:
 
-    style = attr.ib()
-    weight = attr.ib()
-    pt = attr.ib()
-    px = attr.ib()
-    family = attr.ib()
+    style: QFont.Style
+    weight: QFont.Weight
+    pt: int
+    px: int
+    family: str
 
 
 class TestFont:
@@ -1817,10 +1832,17 @@ class TestFormatString:
         '{foo} {bar} {baz}',
         '{foo} {bar',
         '{1}',
+        '{foo.attr}',
+        '{foo[999]}',
     ])
     def test_to_py_invalid(self, typ, val):
         with pytest.raises(configexc.ValidationError):
             typ.to_py(val)
+
+    def test_invalid_encoding(self, klass):
+        typ = klass(fields=[], encoding='ascii')
+        with pytest.raises(configexc.ValidationError):
+            typ.to_py('fooäbar')
 
     @pytest.mark.parametrize('value', [
         None,
@@ -2098,6 +2120,24 @@ class TestUrlPattern:
     def test_to_py_invalid(self, klass):
         with pytest.raises(configexc.ValidationError):
             klass().to_py('http://')
+
+
+class TestStatusbarWidget:
+
+    @pytest.fixture
+    def klass(self):
+        return configtypes.StatusbarWidget
+
+    @pytest.mark.parametrize('value', ['text:bar', 'foo'])
+    def test_validate_valid_values(self, klass, value):
+        widget = klass(valid_values=configtypes.ValidValues('foo'))
+        assert widget.to_py(value) == value
+
+    @pytest.mark.parametrize('value', ['text', 'foo:bar'])
+    def test_validate_invalid_values(self, klass, value):
+        widget = klass(valid_values=configtypes.ValidValues('foo'))
+        with pytest.raises(configexc.ValidationError):
+            widget.to_py(value)
 
 
 @pytest.mark.parametrize('first, second, equal', [

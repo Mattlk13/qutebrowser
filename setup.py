@@ -2,7 +2,7 @@
 
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -17,7 +17,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """setuptools installer script for qutebrowser."""
 
@@ -71,7 +71,9 @@ try:
         entry_points={'gui_scripts':
                       ['qutebrowser = qutebrowser.qutebrowser:main']},
         zip_safe=True,
-        install_requires=['pypeg2', 'jinja2', 'pygments', 'PyYAML', 'attrs'],
+        install_requires=['jinja2', 'PyYAML',
+                          'dataclasses; python_version < "3.7"',
+                          'importlib_resources>=1.1.0; python_version < "3.9"'],
         python_requires='>=3.6',
         name='qutebrowser',
         version=_get_constant('version'),

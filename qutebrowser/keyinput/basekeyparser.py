@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,15 +15,15 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Base class for vim-like key sequence parser."""
 
 import string
 import types
+import dataclasses
 from typing import Mapping, MutableMapping, Optional, Sequence
 
-import attr
 from PyQt5.QtCore import pyqtSignal, QObject, Qt
 from PyQt5.QtGui import QKeySequence, QKeyEvent
 
@@ -32,16 +32,16 @@ from qutebrowser.utils import usertypes, log, utils
 from qutebrowser.keyinput import keyutils
 
 
-@attr.s(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class MatchResult:
 
     """The result of matching a keybinding."""
 
-    match_type: QKeySequence.SequenceMatch = attr.ib()
-    command: Optional[str] = attr.ib()
-    sequence: keyutils.KeySequence = attr.ib()
+    match_type: QKeySequence.SequenceMatch
+    command: Optional[str]
+    sequence: keyutils.KeySequence
 
-    def __attrs_post_init__(self) -> None:
+    def __post_init__(self) -> None:
         if self.match_type == QKeySequence.ExactMatch:
             assert self.command is not None
         else:
@@ -112,7 +112,7 @@ class BindingTrie:
 
         return lines
 
-    def update(self, mapping: Mapping) -> None:
+    def update(self, mapping: Mapping[keyutils.KeySequence, str]) -> None:
         """Add data from the given mapping to the trie."""
         for key in mapping:
             self[key] = mapping[key]

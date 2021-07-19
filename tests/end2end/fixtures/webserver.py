@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2015-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2015-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,18 +15,18 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Fixtures for the server webserver."""
 
 import re
 import sys
 import json
-import os.path
+import pathlib
 import socket
+import dataclasses
 from http import HTTPStatus
 
-import attr
 import pytest
 from PyQt5.QtCore import pyqtSignal, QUrl
 
@@ -62,7 +62,11 @@ class Request(testprocess.Line):
     def _check_status(self):
         """Check if the http status is what we expected."""
         path_to_statuses = {
-            '/favicon.ico': [HTTPStatus.OK, HTTPStatus.PARTIAL_CONTENT],
+            '/favicon.ico': [
+                HTTPStatus.OK,
+                HTTPStatus.PARTIAL_CONTENT,
+                HTTPStatus.NOT_MODIFIED,
+            ],
 
             '/does-not-exist': [HTTPStatus.NOT_FOUND],
             '/does-not-exist-2': [HTTPStatus.NOT_FOUND],
@@ -75,6 +79,7 @@ class Request(testprocess.Line):
             '/absolute-redirect': [HTTPStatus.FOUND],
 
             '/cookies/set': [HTTPStatus.FOUND],
+            '/cookies/set-custom': [HTTPStatus.FOUND],
 
             '/500-inline': [HTTPStatus.INTERNAL_SERVER_ERROR],
             '/500': [HTTPStatus.INTERNAL_SERVER_ERROR],
@@ -100,13 +105,13 @@ class Request(testprocess.Line):
         return NotImplemented
 
 
-@attr.s(frozen=True, eq=False, hash=True)
+@dataclasses.dataclass(frozen=True)
 class ExpectedRequest:
 
     """Class to compare expected requests easily."""
 
-    verb = attr.ib()
-    path = attr.ib()
+    verb: str
+    path: int
 
     @classmethod
     def from_request(cls, request):
@@ -166,14 +171,12 @@ class WebserverProcess(testprocess.Process):
 
     def _executable_args(self):
         if hasattr(sys, 'frozen'):
-            executable = os.path.join(os.path.dirname(sys.executable),
-                                      self._script)
+            executable = str(pathlib.Path(sys.executable).parent / self._script)
             args = []
         else:
             executable = sys.executable
-            py_file = os.path.join(os.path.dirname(__file__),
-                                   self._script + '.py')
-            args = [py_file]
+            py_file = (pathlib.Path(__file__).parent / self._script).with_suffix('.py')
+            args = [str(py_file)]
         return executable, args
 
     def _default_args(self):
@@ -192,21 +195,41 @@ def server(qapp, request):
 @pytest.fixture(autouse=True)
 def server_per_test(server, request):
     """Fixture to clean server request list after each test."""
-    request.node._server_log = server.captured_log
+    if not hasattr(request.node, '_server_logs'):
+        request.node._server_logs = []
+    request.node._server_logs.append(('server', server.captured_log))
+
     server.before_test()
     yield
     server.after_test()
 
 
 @pytest.fixture
+def server2(qapp, request):
+    """Fixture for a second server object for cross-origin tests."""
+    server = WebserverProcess(request, 'webserver_sub')
+
+    if not hasattr(request.node, '_server_logs'):
+        request.node._server_logs = []
+    request.node._server_logs.append(('secondary server', server.captured_log))
+
+    server.start()
+    yield server
+    server.terminate()
+
+
+@pytest.fixture
 def ssl_server(request, qapp):
     """Fixture for a webserver with a self-signed SSL certificate.
 
-    This needs to be explicitly used in a test, and overwrites the server log
-    used in that test.
+    This needs to be explicitly used in a test.
     """
     server = WebserverProcess(request, 'webserver_sub_ssl')
-    request.node._server_log = server.captured_log
+
+    if not hasattr(request.node, '_server_logs'):
+        request.node._server_logs = []
+    request.node._server_logs.append(('SSL server', server.captured_log))
+
     server.start()
     yield server
     server.after_test()

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,15 +15,15 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Tests for qutebrowser.utils.urlutils."""
 
 import os.path
 import logging
+import dataclasses
 import urllib.parse
 
-import attr
 from PyQt5.QtCore import QUrl
 from PyQt5.QtNetwork import QNetworkProxy
 import pytest
@@ -50,10 +50,10 @@ class FakeDNS:
                 when fromname_mock is called.
     """
 
-    @attr.s
+    @dataclasses.dataclass
     class FakeDNSAnswer:
 
-        error = attr.ib()
+        error: bool
 
     def __init__(self):
         self.used = False
@@ -350,14 +350,14 @@ def test_get_search_url_invalid(url):
         urlutils._get_search_url(url)
 
 
-@attr.s
+@dataclasses.dataclass
 class UrlParams:
 
-    url = attr.ib()
-    is_url = attr.ib(True)
-    is_url_no_autosearch = attr.ib(True)
-    use_dns = attr.ib(True)
-    is_url_in_schemeless = attr.ib(False)
+    url: QUrl
+    is_url: bool = True
+    is_url_no_autosearch: bool = True
+    use_dns: bool = True
+    is_url_in_schemeless: bool = False
 
 
 @pytest.mark.parametrize('auto_search',
@@ -552,9 +552,20 @@ def test_raise_cmdexc_if_invalid(url, valid, has_err_string):
     (QUrl('http://user:password@qutebrowser.org/foo?bar=baz#fish'), 'foo'),
     (QUrl('http://qutebrowser.org/'), 'qutebrowser.org.html'),
     (QUrl('qute://'), None),
+    # data URL support
+    (QUrl('data:text/plain,'), 'download.txt'),
+    (QUrl('data:application/pdf,'), 'download.pdf'),
+    (QUrl('data:foo/bar,'), 'download'),  # unknown extension
+    (QUrl('data:text/xul,'), 'download.xul'),  # strict=False
+    (QUrl('data:'), None),  # invalid data URL
 ])
 def test_filename_from_url(qurl, output):
     assert urlutils.filename_from_url(qurl) == output
+
+
+@pytest.mark.parametrize('qurl', [QUrl(), QUrl('qute://'), QUrl('data:')])
+def test_filename_from_url_fallback(qurl):
+    assert urlutils.filename_from_url(qurl, fallback='fallback') == 'fallback'
 
 
 @pytest.mark.parametrize('qurl, expected', [
@@ -615,7 +626,7 @@ class TestInvalidUrlError:
 
 @pytest.mark.parametrize('are_same, url1, url2', [
     (True, 'http://example.com', 'http://www.example.com'),
-    (True, 'http://bbc.co.uk', 'https://www.bbc.co.uk'),
+    (True, 'http://bbc.co.uk', 'http://www.bbc.co.uk'),
     (True, 'http://many.levels.of.domains.example.com', 'http://www.example.com'),
     (True, 'http://idn.иком.museum', 'http://idn2.иком.museum'),
     (True, 'http://one.not_a_valid_tld', 'http://one.not_a_valid_tld'),
@@ -624,6 +635,9 @@ class TestInvalidUrlError:
     (False, 'https://example.kids.museum', 'http://example.kunst.museum'),
     (False, 'http://idn.иком.museum', 'http://idn.ירושלים.museum'),
     (False, 'http://one.not_a_valid_tld', 'http://two.not_a_valid_tld'),
+
+    (False, 'http://example.org', 'https://example.org'),  # different scheme
+    (False, 'http://example.org:80', 'http://example.org:8080'),  # different port
 ])
 def test_same_domain(are_same, url1, url2):
     """Test same_domain."""
@@ -764,3 +778,26 @@ class TestParseJavascriptUrl:
             pass
         else:
             assert parsed == source
+
+
+class TestWiden:
+
+    @pytest.mark.parametrize('hostname, expected', [
+        ('a.b.c', ['a.b.c', 'b.c', 'c']),
+        ('foobarbaz', ['foobarbaz']),
+        ('', []),
+        ('.c', ['.c', 'c']),
+        ('c.', ['c.']),
+        ('.c.', ['.c.', 'c.']),
+        (None, []),
+    ])
+    def test_widen_hostnames(self, hostname, expected):
+        assert list(urlutils.widened_hostnames(hostname)) == expected
+
+    @pytest.mark.parametrize('hostname', [
+        'test.qutebrowser.org',
+        'a.b.c.d.e.f.g.h.i.j.k.l.m.n.o.p.q.r.s.t.u.v.w.z.y.z',
+        'qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq.c',
+    ])
+    def test_bench_widen_hostnames(self, hostname, benchmark):
+        benchmark(lambda: list(urlutils.widened_hostnames(hostname)))

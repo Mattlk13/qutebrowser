@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Ryan Roden-Corrent (rcorre) <ryan@rcorre.net>
+# Copyright 2018-2021 Ryan Roden-Corrent (rcorre) <ryan@rcorre.net>
 #
 # This file is part of qutebrowser.
 #
@@ -15,9 +15,11 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 from unittest import mock
 
+import hypothesis
+import hypothesis.strategies
 import pytest
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QTextDocument, QColor
@@ -69,6 +71,13 @@ def test_benchmark_highlight(benchmark):
     benchmark(bench)
 
 
+@hypothesis.given(text=hypothesis.strategies.text())
+def test_pattern_hypothesis(text):
+    """Make sure we can't produce invalid patterns."""
+    doc = QTextDocument()
+    completiondelegate._Highlighter(doc, text, Qt.red)
+
+
 def test_highlighted(qtbot):
     """Make sure highlighting works.
 
@@ -83,7 +92,7 @@ def test_highlighted(qtbot):
 
     # Needed so the highlighting actually works.
     edit = QTextEdit()
-    qtbot.addWidget(edit)
+    qtbot.add_widget(edit)
     edit.setDocument(doc)
 
     colors = [f.foreground().color() for f in doc.allFormats()]

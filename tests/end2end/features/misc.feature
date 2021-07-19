@@ -140,7 +140,7 @@ Feature: Various utility commands.
 
     Scenario: :jseval --file using a file that doesn't exist as js-code
         When I run :jseval --file /nonexistentfile
-        Then the error "[Errno 2] No such file or directory: '/nonexistentfile'" should be shown
+        Then the error "[Errno 2] *: '/nonexistentfile'" should be shown
         And "No output or error" should not be logged
 
     # :debug-webaction
@@ -173,18 +173,18 @@ Feature: Various utility commands.
 
     @no_xvfb @posix @qtwebengine_skip
     Scenario: Inspector smoke test
-        When I run :inspector
+        When I run :devtools
         And I wait for "Focus object changed: <PyQt5.QtWebKitWidgets.QWebView object at *>" in the log
-        And I run :inspector
+        And I run :devtools
         And I wait for "Focus object changed: *" in the log
         Then no crash should happen
 
     # Different code path as an inspector got created now
     @no_xvfb @posix @qtwebengine_skip
     Scenario: Inspector smoke test 2
-        When I run :inspector
+        When I run :devtools
         And I wait for "Focus object changed: <PyQt5.QtWebKitWidgets.QWebView object at *>" in the log
-        And I run :inspector
+        And I run :devtools
         And I wait for "Focus object changed: *" in the log
         Then no crash should happen
 
@@ -315,7 +315,7 @@ Feature: Various utility commands.
         And I wait for "Entering mode KeyMode.prompt *" in the log
         And I press the key "<Tab>"
         And I press the key "<Ctrl-C>"
-        And I run :leave-mode
+        And I run :mode-leave
         Then no crash should happen
 
     ## Custom headers
@@ -324,6 +324,11 @@ Feature: Various utility commands.
         When I set content.headers.custom to {"X-Qute-Test": "testvalue"}
         And I open headers
         Then the header X-Qute-Test should be set to testvalue
+
+    Scenario: Setting accept header
+        When I set content.headers.custom to {"Accept": "testvalue"}
+        And I open headers
+        Then the header Accept should be set to testvalue
 
     Scenario: DNT header
         When I set content.headers.do_not_track to true
@@ -365,6 +370,14 @@ Feature: Various utility commands.
         And I open about:blank
         And I run :jseval console.log(window.navigator.userAgent)
         Then the javascript message "toaster" should be logged
+
+    @qtwebkit_skip
+    Scenario: Custom headers via XHR
+        When I set content.headers.custom to {"Accept": "config-value", "X-Qute-Test": "config-value"}
+        And I open data/misc/xhr_headers.html
+        And I wait for the javascript message "Got headers via XHR"
+        Then the header Accept should be set to '*/*'
+        And the header X-Qute-Test should be set to config-value
 
     ## https://github.com/qutebrowser/qutebrowser/issues/1523
 
@@ -455,6 +468,18 @@ Feature: Various utility commands.
         And I run :command-accept
         Then the message "blah" should be shown
 
+    Scenario: Command starting with space and calling previous command
+        When I run :set-cmd-text :message-info first
+        And I run :command-accept
+        And I wait for "first" in the log
+        When I run :set-cmd-text : message-info second
+        And I run :command-accept
+        And I wait for "second" in the log
+        And I run :set-cmd-text :
+        And I run :command-history-prev
+        And I run :command-accept
+        Then the message "first" should be shown
+
     Scenario: Calling previous command with :completion-item-focus
         When I run :set-cmd-text :message-info blah
         And I wait for "Entering mode KeyMode.command (reason: *)" in the log
@@ -491,10 +516,10 @@ Feature: Various utility commands.
         And I run :command-accept
         Then the error "No command given" should be shown
 
-    ## Modes blacklisted for :enter-mode
+    ## Modes blacklisted for :mode-enter
 
-    Scenario: Trying to enter command mode with :enter-mode
-        When I run :enter-mode command
+    Scenario: Trying to enter command mode with :mode-enter
+        When I run :mode-enter command
         Then the error "Mode command can't be entered manually!" should be shown
 
     ## Renderer crashes
@@ -503,13 +528,13 @@ Feature: Various utility commands.
     @qtwebkit_skip @no_invalid_lines @posix
     Scenario: Renderer crash
         When I run :open -t chrome://crash
-        Then "Renderer process crashed" should be logged
+        Then "Renderer process crashed (status *)" should be logged
         And "* 'Error loading chrome://crash/'" should be logged
 
     @qtwebkit_skip @no_invalid_lines @flaky
     Scenario: Renderer kill
         When I run :open -t chrome://kill
-        Then "Renderer process was killed" should be logged
+        Then "Renderer process was killed (status *)" should be logged
         And "* 'Error loading chrome://kill/'" should be logged
 
     # https://github.com/qutebrowser/qutebrowser/issues/2290
@@ -519,18 +544,25 @@ Feature: Various utility commands.
         And I open data/numbers/1.txt
         And I open data/numbers/2.txt in a new tab
         And I run :open chrome://kill
-        And I wait for "Renderer process was killed" in the log
+        And I wait for "Renderer process was killed (status *)" in the log
         And I open data/numbers/3.txt
         Then no crash should happen
 
+    # https://github.com/qutebrowser/qutebrowser/issues/5721
+    @qtwebkit_skip @qt!=5.15.1
+    Scenario: WebRTC renderer process crash
+        When I open data/crashers/webrtc.html in a new tab
+        And I run :reload
+        And I wait until data/crashers/webrtc.html is loaded
+        Then "Renderer process crashed (status *)" should not be logged
+
+    Scenario: InstalledApps crash
+        When I open data/crashers/installedapp.html in a new tab
+        Then "Renderer process was killed (status *)" should not be logged
+
     ## Other
 
-    Scenario: Simple adblock update
-        When I set up "simple" as block lists
-        And I run :adblock-update
-        Then the message "adblock: Read 1 hosts from 1 sources." should be shown
-
     Scenario: Resource with invalid URL
-        When I open data/invalid_resource.html
+        When I open data/invalid_resource.html in a new tab
         Then "Ignoring invalid * URL: Invalid hostname (contains invalid characters); *" should be logged
         And no crash should happen

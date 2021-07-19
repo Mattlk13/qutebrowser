@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 
 import pytest
@@ -187,6 +187,8 @@ class TestUp:
         ('/one/two/three', 1, '/one/two'),
         ('/one/two/three?foo=bar', 1, '/one/two'),
         ('/one/two/three', 2, '/one'),
+        ('/one/two%2Fthree', 1, '/one'),
+        ('/one/two%2Fthree/four', 1, '/one/two%2Fthree'),
     ])
     def test_up(self, url_suffix, count, expected_suffix):
         url_base = 'https://example.com'

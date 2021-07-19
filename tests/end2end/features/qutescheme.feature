@@ -54,7 +54,7 @@ Feature: Special qute:// pages
         And I run :tab-only
         And I open qute:help without waiting
         And I wait for "Changing title for idx 0 to 'qutebrowser help'" in the log
-        And I hint with args "links normal" and follow a
+        And I hint with args "links normal" and follow ls
         Then qute://help/quickstart.html should be loaded
 
     Scenario: Opening a link with qute://help
@@ -62,7 +62,7 @@ Feature: Special qute:// pages
         And I run :tab-only
         And I open qute://help without waiting
         And I wait until qute://help/ is loaded
-        And I hint with args "links normal" and follow a
+        And I hint with args "links normal" and follow ls
         Then qute://help/quickstart.html should be loaded
 
     Scenario: Opening a link with qute://help/index.html/..
@@ -167,7 +167,7 @@ Feature: Special qute:// pages
     Scenario: qute://settings CSRF token (webengine)
         When I open qute://settings
         And I run :jseval const xhr = new XMLHttpRequest(); xhr.open("GET", "qute://settings/set"); xhr.send()
-        Then "RequestDeniedError while handling qute://* URL" should be logged
+        Then "RequestDeniedError while handling qute://* URL: Invalid CSRF token!" should be logged
         And the error "Invalid CSRF token for qute://settings!" should be shown
 
     # pdfjs support
@@ -193,7 +193,7 @@ Feature: Special qute:// pages
         And I wait for "[qute://pdfjs/*] PDF * (PDF.js: *)" in the log
         And I run :jseval document.getElementById("download").click()
         And I wait for "Asking question <qutebrowser.utils.usertypes.Question default=* mode=<PromptMode.download: 5> option=None text=* title='Save file to:'>, *" in the log
-        And I run :leave-mode
+        And I run :mode-leave
         Then no crash should happen
 
     # :pyeval
@@ -215,7 +215,7 @@ Feature: Special qute:// pages
 
     Scenario: Running :pyeval --file using a non existing file
         When I run :debug-pyeval --file nonexistentfile
-        Then the error "[Errno 2] No such file or directory: 'nonexistentfile'" should be shown
+        Then the error "[Errno 2] *: 'nonexistentfile'" should be shown
 
     Scenario: Running :pyeval with --quiet
         When I run :debug-pyeval --quiet 1+1
@@ -281,7 +281,8 @@ Feature: Special qute:// pages
         Then the error "Invalid log category invalid - *" should be shown
 
     Scenario: Using qute://log directly
-        When I open qute://log
+        When I open qute://log without waiting
+        And I wait for "Changing title for idx * to 'log'" in the log
         Then no crash should happen
 
     # FIXME More possible tests:

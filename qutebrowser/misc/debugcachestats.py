@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2019-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2019-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Implementation of the command debug-cache-stats.
 
@@ -30,7 +30,7 @@ from typing import Any, Callable, List, Optional, Tuple, TypeVar
 _CACHE_FUNCTIONS: List[Tuple[str, Any]] = []
 
 
-_T = TypeVar('_T', bound=Callable)
+_T = TypeVar('_T', bound=Callable[..., Any])
 
 
 def register(name: Optional[str] = None) -> Callable[[_T], _T]:

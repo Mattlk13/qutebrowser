@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,10 +15,11 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The main browser widget for QtWebEngine."""
 
+from typing import List, Iterable
 
 from PyQt5.QtCore import pyqtSignal, QUrl
 from PyQt5.QtGui import QPalette
@@ -28,6 +29,20 @@ from qutebrowser.browser import shared
 from qutebrowser.browser.webengine import webenginesettings, certificateerror
 from qutebrowser.config import config
 from qutebrowser.utils import log, debug, usertypes
+
+
+_QB_FILESELECTION_MODES = {
+    QWebEnginePage.FileSelectOpen: shared.FileSelectionMode.single_file,
+    QWebEnginePage.FileSelectOpenMultiple: shared.FileSelectionMode.multiple_files,
+    # WORKAROUND for https://bugreports.qt.io/browse/QTBUG-91489
+    #
+    # QtWebEngine doesn't expose this value from its internal
+    # FilePickerControllerPrivate::FileChooserMode enum (i.e. it's not included in
+    # the public QWebEnginePage::FileSelectionMode enum).
+    # However, QWebEnginePage::chooseFiles is still called with the matching value
+    # (2) when a file input with "webkitdirectory" is used.
+    QWebEnginePage.FileSelectionMode(2): shared.FileSelectionMode.folder,
+}
 
 
 class WebEngineView(QWebEngineView):
@@ -238,3 +253,24 @@ class WebEnginePage(QWebEnginePage):
             is_main_frame=is_main_frame)
         self.navigation_request.emit(navigation)
         return navigation.accepted
+
+    def chooseFiles(
+        self,
+        mode: QWebEnginePage.FileSelectionMode,
+        old_files: Iterable[str],
+        accepted_mimetypes: Iterable[str],
+    ) -> List[str]:
+        """Override chooseFiles to (optionally) invoke custom file uploader."""
+        handler = config.val.fileselect.handler
+        if handler == "default":
+            return super().chooseFiles(mode, old_files, accepted_mimetypes)
+        assert handler == "external", handler
+        try:
+            qb_mode = _QB_FILESELECTION_MODES[mode]
+        except KeyError:
+            log.webview.warning(
+                f"Got file selection mode {mode}, but we don't support that!"
+            )
+            return super().chooseFiles(mode, old_files, accepted_mimetypes)
+
+        return shared.choose_file(qb_mode=qb_mode)

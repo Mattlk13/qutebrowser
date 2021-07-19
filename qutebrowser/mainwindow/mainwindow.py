@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The main window of qutebrowser."""
 
@@ -27,7 +27,7 @@ from typing import List, MutableSequence, Optional, Tuple, cast
 
 from PyQt5.QtCore import (pyqtBoundSignal, pyqtSlot, QRect, QPoint, QTimer, Qt,
                           QCoreApplication, QEventLoop, QByteArray)
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QApplication, QSizePolicy
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSizePolicy
 from PyQt5.QtGui import QPalette
 
 from qutebrowser.commands import runners
@@ -38,8 +38,8 @@ from qutebrowser.utils import (message, log, usertypes, qtutils, objreg, utils,
 from qutebrowser.mainwindow import messageview, prompt
 from qutebrowser.completion import completionwidget, completer
 from qutebrowser.keyinput import modeman
-from qutebrowser.browser import commands, downloadview, hints, downloads
-from qutebrowser.misc import crashsignal, keyhintwidget, sessions
+from qutebrowser.browser import downloadview, hints, downloads
+from qutebrowser.misc import crashsignal, keyhintwidget, sessions, objects
 from qutebrowser.qt import sip
 
 
@@ -100,7 +100,7 @@ def raise_window(window, alert=True):
         window.activateWindow()
 
     if alert:
-        QApplication.instance().alert(window)
+        objects.qapp.alert(window)
 
 
 def get_target_window():
@@ -203,8 +203,10 @@ class MainWindow(QWidget):
         from qutebrowser.mainwindow.statusbar import bar
 
         self.setAttribute(Qt.WA_DeleteOnClose)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.palette().setColor(QPalette.Window, Qt.transparent)
+        if config.val.window.transparent:
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            self.palette().setColor(QPalette.Window, Qt.transparent)
+
         self._overlays: MutableSequence[_OverlayInfoType] = []
         self.win_id = next(win_id_gen)
         self.registry = objreg.ObjectRegistry()
@@ -273,7 +275,7 @@ class MainWindow(QWidget):
         QTimer.singleShot(0, self._connect_overlay_signals)
         config.instance.changed.connect(self._on_config_changed)
 
-        QApplication.instance().new_window.emit(self)
+        objects.qapp.new_window.emit(self)
         self._set_decoration(config.val.window.hide_decoration)
 
         self.state_before_fullscreen = self.windowState()
@@ -379,6 +381,8 @@ class MainWindow(QWidget):
         self._add_overlay(self._completion, self._completion.update_geometry)
 
     def _init_command_dispatcher(self):
+        # Lazy import to avoid circular imports
+        from qutebrowser.browser import commands
         self._command_dispatcher = commands.CommandDispatcher(
             self.win_id, self.tabbed_browser)
         objreg.register('command-dispatcher',

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -16,7 +16,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Various small code checkers."""
 
@@ -143,10 +143,11 @@ def _check_spelling_file(path, fobj, patterns):
     ok = True
     for num, line in enumerate(fobj, start=1):
         for pattern, explanation in patterns:
-            if pattern.search(line):
+            match = pattern.search(line)
+            if match:
                 ok = False
-                print(f'{path}:{num}: Found "{pattern.pattern}" - ', end='')
-                utils.print_col(explanation, 'blue')
+                print(f'{path}:{num}: ', end='')
+                utils.print_col(f'Found "{match.group(0)}" - {explanation}', 'blue')
     return ok
 
 
@@ -154,14 +155,15 @@ def check_spelling(args: argparse.Namespace) -> Optional[bool]:
     """Check commonly misspelled words."""
     # Words which I often misspell
     words = {'behaviour', 'quitted', 'likelyhood', 'sucessfully',
-             'occur[^rs .!]', 'seperator', 'explicitely', 'auxillary',
+             'occur[^rs .!,]', 'seperator', 'explicitely', 'auxillary',
              'accidentaly', 'ambigious', 'loosly', 'initialis', 'convienence',
              'similiar', 'uncommited', 'reproducable', 'an user',
              'convienience', 'wether', 'programatically', 'splitted',
              'exitted', 'mininum', 'resett?ed', 'recieved', 'regularily',
              'underlaying', 'inexistant', 'elipsis', 'commiting', 'existant',
              'resetted', 'similarily', 'informations', 'an url', 'treshold',
-             'artefact', 'an unix', 'an utf', 'an unicode'}
+             'artefact', 'an unix', 'an utf', 'an unicode', 'unparseable',
+             'dependancies', 'convertable', 'chosing', 'authentification'}
 
     # Words which look better when splitted, but might need some fine tuning.
     words |= {'webelements', 'mouseevent', 'keysequence', 'normalmode',
@@ -174,6 +176,23 @@ def check_spelling(args: argparse.Namespace) -> Optional[bool]:
             "Common misspelling or non-US spelling"
         ) for w in words
     ]
+
+    qtbot_methods = {
+        'keyPress',
+        'keyRelease',
+        'keyClick',
+        'keyClicks',
+        'keyEvent',
+        'mousePress',
+        'mouseRelease',
+        'mouseClick',
+        'mouseMove',
+        'mouseDClick',
+        'keySequence',
+    }
+
+    qtbot_excludes = '|'.join(qtbot_methods)
+
     patterns += [
         (
             re.compile(r'(?i)# noqa(?!: )'),
@@ -185,7 +204,7 @@ def check_spelling(args: argparse.Namespace) -> Optional[bool]:
              "'type: ignore[error-code]' instead."),
         ),
         (
-            re.compile(r'# type: (?!ignore\[)'),
+            re.compile(r'# type: (?!ignore(\[|$))'),
             "Don't use type comments, use type annotations instead.",
         ),
         (
@@ -196,6 +215,54 @@ def check_spelling(args: argparse.Namespace) -> Optional[bool]:
             re.compile(r"""monkeypatch\.setattr\(['"]"""),
             "Don't use monkeypatch.setattr('obj.attr', value), use "
             "setattr(obj, 'attr', value) instead.",
+        ),
+        (
+            re.compile(r'(exec|print)_\('),
+            ".exec_()/.print_() are removed in PyQt 6, use .exec()/.print() instead.",
+        ),
+        (
+            re.compile(r'qApp'),
+            "qApp is removed in PyQt 6, use QApplication.instance() instead.",
+        ),
+        (
+            re.compile(r'PYQT_CONFIGURATION'),
+            "PYQT_CONFIGURATION is removed in PyQt 6",
+        ),
+        (
+            re.compile(r'Q_(ENUM|FLAG)'),
+            "Q_ENUM and Q_FLAG are removed in PyQt 6",
+        ),
+        (
+            re.compile(r'attr\.(s|ib)($|\()'),
+            "attrs have been replaced by dataclasses in qutebrowser.",
+        ),
+        (
+            re.compile(r'http://www\.gnu\.org/licenses/'),
+            "use https:// URL.",
+        ),
+        (
+            re.compile(r'IOError'),
+            "use OSError",
+        ),
+        (
+            re.compile(fr'qtbot\.(?!{qtbot_excludes})[a-z]+[A-Z].*'),
+            "use snake-case instead",
+        ),
+        (
+            re.compile(r'\.joinpath\((?!\*)'),
+            "use the / operator for joining paths",
+        ),
+        (
+            re.compile(r"""pathlib\.Path\(["']~["']\)\.expanduser\(\)"""),
+            "use pathlib.Path.home() instead",
+        ),
+        (
+            re.compile(r'pathlib\.Path\(tmp_path\)'),
+            "tmp_path already is a pathlib.Path",
+        ),
+        (
+            re.compile(r'pathlib\.Path\(tmpdir\)'),
+            "use tmp_path instead",
         ),
     ]
 
@@ -274,12 +341,39 @@ def check_userscripts_descriptions(_args: argparse.Namespace = None) -> bool:
     return ok
 
 
+def check_userscript_shebangs(_args: argparse.Namespace) -> bool:
+    """Check that we're using /usr/bin/env in shebangs."""
+    ok = True
+    folder = pathlib.Path('misc/userscripts')
+
+    for sub in folder.iterdir():
+        if sub.is_dir() or sub.name == 'README.md':
+            continue
+
+        with sub.open('r', encoding='utf-8') as f:
+            shebang = f.readline().rstrip('\n')
+        assert shebang.startswith('#!'), shebang
+        shebang = shebang[2:]
+
+        binary = shebang.split()[0]
+        if binary not in ['/bin/sh', '/usr/bin/env']:
+            bin_name = pathlib.Path(binary).name
+            print(f"In {sub}, use #!/usr/bin/env {bin_name} instead of #!{binary}")
+            ok = False
+        elif shebang in ['/usr/bin/env python', '/usr/bin/env python2']:
+            print(f"In {sub}, use #!/usr/bin/env python3 instead of #!{shebang}")
+            ok = False
+
+    return ok
+
+
 def main() -> int:
     checkers = {
         'git': check_git,
         'vcs': check_vcs_conflict,
         'spelling': check_spelling,
-        'userscripts': check_userscripts_descriptions,
+        'userscript-descriptions': check_userscripts_descriptions,
+        'userscript-shebangs': check_userscript_shebangs,
         'changelog-urls': check_changelog_urls,
     }
 

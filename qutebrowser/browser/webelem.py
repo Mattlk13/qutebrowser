@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Generic web element related code."""
 
@@ -58,7 +58,8 @@ def css_selector(group: str, url: QUrl) -> str:
     return ','.join(selectors[group])
 
 
-class AbstractWebElement(collections.abc.MutableMapping):
+# MutableMapping is only generic in Python 3.9+
+class AbstractWebElement(collections.abc.MutableMapping):  # type: ignore[type-arg]
 
     """A wrapper around QtWebKit/QtWebEngine web element."""
 

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """QtWebEngine specific code for downloads."""
 
@@ -27,7 +27,8 @@ from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QObject
 from PyQt5.QtWebEngineWidgets import QWebEngineDownloadItem
 
 from qutebrowser.browser import downloads, pdfjs
-from qutebrowser.utils import debug, usertypes, message, log, objreg
+from qutebrowser.utils import (debug, usertypes, message, log, objreg, urlutils,
+                               utils, version)
 
 
 class DownloadItem(downloads.AbstractDownloadItem):
@@ -201,7 +202,7 @@ class DownloadItem(downloads.AbstractDownloadItem):
         return None
 
 
-def _get_suggested_filename(path):
+def _strip_suffix(filename):
     """Convert a path we got from chromium to a suggested filename.
 
     Chromium thinks we want to download stuff to ~/Download, so even if we
@@ -211,8 +212,6 @@ def _get_suggested_filename(path):
 
     See https://bugreports.qt.io/browse/QTBUG-56978
     """
-    filename = os.path.basename(path)
-
     suffix_re = re.compile(r"""
       \ ?  # Optional space between filename and suffix
       (
@@ -249,8 +248,31 @@ class DownloadManager(downloads.AbstractDownloadManager):
     @pyqtSlot(QWebEngineDownloadItem)
     def handle_download(self, qt_item):
         """Start a download coming from a QWebEngineProfile."""
-        suggested_filename = _get_suggested_filename(qt_item.path())
-        use_pdfjs = pdfjs.should_use_pdfjs(qt_item.mimeType(), qt_item.url())
+        qt_filename = os.path.basename(qt_item.path())   # FIXME use 5.14 API
+        mime_type = qt_item.mimeType()
+        url = qt_item.url()
+        origin = qt_item.page().url() if qt_item.page() else QUrl()
+
+        # WORKAROUND for https://bugreports.qt.io/browse/QTBUG-90355
+        if version.qtwebengine_versions().webengine >= utils.VersionNumber(5, 15, 3):
+            needs_workaround = False
+        elif url.scheme().lower() == 'data':
+            if '/' in url.path().split(',')[-1]:  # e.g. a slash in base64
+                wrong_filename = url.path().split('/')[-1]
+            else:
+                wrong_filename = mime_type.split('/')[1]
+
+            needs_workaround = qt_filename == wrong_filename
+        else:
+            needs_workaround = False
+
+        if needs_workaround:
+            suggested_filename = urlutils.filename_from_url(
+                url, fallback='qutebrowser-download')
+        else:
+            suggested_filename = _strip_suffix(qt_filename)
+
+        use_pdfjs = pdfjs.should_use_pdfjs(mime_type, url)
 
         download = DownloadItem(qt_item, manager=self)
         self._init_item(download, auto_remove=use_pdfjs,
@@ -271,12 +293,16 @@ class DownloadManager(downloads.AbstractDownloadManager):
             download.set_target(target)
             return
 
+        if url.scheme() == "file" and origin.isValid() and origin.scheme() == "file":
+            utils.open_file(url.toLocalFile())
+            qt_item.cancel()
+            return
+
         # Ask the user for a filename - needs to be blocking!
         question = downloads.get_filename_question(
             suggested_filename=suggested_filename, url=qt_item.url(),
             parent=self)
         self._init_filename_question(question, download)
-
         message.global_bridge.ask(question, blocking=True)
         # The filename is set via the question.answered signal, connected in
         # _init_filename_question.

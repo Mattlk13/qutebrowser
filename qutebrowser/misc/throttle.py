@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Jay Kamat <jaygkamat@gmail.com>
+# Copyright 2018-2021 Jay Kamat <jaygkamat@gmail.com>
 #
 # This file is part of qutebrowser.
 #
@@ -15,24 +15,24 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """A throttle for throttling function calls."""
 
+import dataclasses
 import time
 from typing import Any, Callable, Mapping, Optional, Sequence
 
-import attr
 from PyQt5.QtCore import QObject
 
 from qutebrowser.utils import usertypes
 
 
-@attr.s
+@dataclasses.dataclass
 class _CallArgs:
 
-    args: Sequence[Any] = attr.ib()
-    kwargs: Mapping[str, Any] = attr.ib()
+    args: Sequence[Any]
+    kwargs: Mapping[str, Any]
 
 
 class Throttle(QObject):
@@ -45,7 +45,7 @@ class Throttle(QObject):
     """
 
     def __init__(self,
-                 func: Callable,
+                 func: Callable[..., None],
                  delay_ms: int,
                  parent: QObject = None) -> None:
         """Constructor.

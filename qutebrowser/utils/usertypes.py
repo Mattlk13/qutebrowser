@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,34 +15,23 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Custom useful data types."""
 
+import html
 import operator
 import enum
-from typing import TYPE_CHECKING, Any, Optional, Sequence, TypeVar, Union
+import dataclasses
+from typing import Optional, Sequence, TypeVar, Union
 
-import attr
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, QTimer
 from PyQt5.QtCore import QUrl
 
 from qutebrowser.utils import log, qtutils, utils
 
 
-if TYPE_CHECKING:
-    # Protocol was added in Python 3.8
-    from typing import Protocol
-
-    class SupportsLessThan(Protocol):
-
-        """Protocol for the _T TypeVar below."""
-
-        def __lt__(self, other: Any) -> bool:
-            ...
-
-
-_T = TypeVar('_T', bound='SupportsLessThan')
+_T = TypeVar('_T', bound=utils.Comparable)
 
 
 class Unset:
@@ -495,9 +484,6 @@ class AbstractCertificateErrorWrapper:
 
     """A wrapper over an SSL/certificate error."""
 
-    def __init__(self, error: Any) -> None:
-        self._error = error
-
     def __str__(self) -> str:
         raise NotImplementedError
 
@@ -507,8 +493,11 @@ class AbstractCertificateErrorWrapper:
     def is_overridable(self) -> bool:
         raise NotImplementedError
 
+    def html(self) -> str:
+        return f'<p>{html.escape(str(self))}</p>'
 
-@attr.s
+
+@dataclasses.dataclass
 class NavigationRequest:
 
     """A request to navigate to the given URL."""
@@ -538,7 +527,7 @@ class NavigationRequest:
         #: None of the above.
         other = 8
 
-    url: QUrl = attr.ib()
-    navigation_type: Type = attr.ib()
-    is_main_frame: bool = attr.ib()
-    accepted: bool = attr.ib(default=True)
+    url: QUrl
+    navigation_type: Type
+    is_main_frame: bool
+    accepted: bool = True

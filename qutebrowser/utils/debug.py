@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Utilities used for debugging."""
 
@@ -29,13 +29,13 @@ from typing import (
     Any, Callable, List, Mapping, MutableSequence, Optional, Sequence, Type, Union)
 
 from PyQt5.QtCore import Qt, QEvent, QMetaMethod, QObject, pyqtBoundSignal
-from PyQt5.QtWidgets import QApplication
 
 from qutebrowser.utils import log, utils, qtutils, objreg
+from qutebrowser.misc import objects
 from qutebrowser.qt import sip
 
 
-def log_events(klass: Type) -> Type:
+def log_events(klass: Type[QObject]) -> Type[QObject]:
     """Class decorator to log Qt events."""
     old_event = klass.event
 
@@ -46,7 +46,7 @@ def log_events(klass: Type) -> Type:
                                                 qenum_key(QEvent, e.type())))
         return old_event(self, e)
 
-    klass.event = new_event
+    klass.event = new_event  # type: ignore[assignment]
     return klass
 
 
@@ -96,10 +96,13 @@ def log_signals(obj: QObject) -> QObject:
     return obj
 
 
-def qenum_key(base: Type,
-              value: Union[int, sip.simplewrapper],
+_EnumValueType = Union[sip.simplewrapper, int]
+
+
+def qenum_key(base: Type[_EnumValueType],
+              value: _EnumValueType,
               add_base: bool = False,
-              klass: Type = None) -> str:
+              klass: Type[_EnumValueType] = None) -> str:
     """Convert a Qt Enum value to its key as a string.
 
     Args:
@@ -119,8 +122,9 @@ def qenum_key(base: Type,
             raise TypeError("Can't guess enum class of an int!")
 
     try:
-        idx = base.staticMetaObject.indexOfEnumerator(klass.__name__)
-        meta_enum = base.staticMetaObject.enumerator(idx)
+        meta_obj = base.staticMetaObject  # type: ignore[union-attr]
+        idx = meta_obj.indexOfEnumerator(klass.__name__)
+        meta_enum = meta_obj.enumerator(idx)
         ret = meta_enum.valueToKey(int(value))  # type: ignore[arg-type]
     except AttributeError:
         ret = None
@@ -139,10 +143,10 @@ def qenum_key(base: Type,
         return ret
 
 
-def qflags_key(base: Type,
-               value: Union[int, sip.simplewrapper],
+def qflags_key(base: Type[_EnumValueType],
+               value: _EnumValueType,
                add_base: bool = False,
-               klass: Type = None) -> str:
+               klass: Type[_EnumValueType] = None) -> str:
     """Convert a Qt QFlags value to its keys as string.
 
     Note: Passing a combined value (such as Qt.AlignCenter) will get the names
@@ -220,7 +224,7 @@ def signal_name(sig: pyqtBoundSignal) -> str:
     return m.group('name')
 
 
-def format_args(args: Sequence = None, kwargs: Mapping = None) -> str:
+def format_args(args: Sequence[Any] = None, kwargs: Mapping[str, Any] = None) -> str:
     """Format a list of arguments/kwargs to a function-call like string."""
     if args is not None:
         arglist = [utils.compact_text(repr(arg), 200) for arg in args]
@@ -245,9 +249,9 @@ def dbg_signal(sig: pyqtBoundSignal, args: Any) -> str:
     return '{}({})'.format(signal_name(sig), format_args(args))
 
 
-def format_call(func: Callable,
-                args: Sequence = None,
-                kwargs: Mapping = None,
+def format_call(func: Callable[..., Any],
+                args: Sequence[Any] = None,
+                kwargs: Mapping[str, Any] = None,
                 full: bool = True) -> str:
     """Get a string representation of a function calls with the given args.
 
@@ -302,7 +306,7 @@ class log_time:  # noqa: N801,N806 pylint: disable=invalid-name
         self._logger.debug("{} took {} seconds.".format(
             self._action.capitalize(), delta))
 
-    def __call__(self, func: Callable) -> Callable:
+    def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapped(*args: Any, **kwargs: Any) -> Any:
             """Call the original function."""
@@ -314,7 +318,7 @@ class log_time:  # noqa: N801,N806 pylint: disable=invalid-name
 
 def _get_widgets() -> Sequence[str]:
     """Get a string list of all widgets."""
-    widgets = QApplication.instance().allWidgets()
+    widgets = objects.qapp.allWidgets()
     widgets.sort(key=repr)
     return [repr(w) for w in widgets]
 
@@ -338,7 +342,7 @@ def get_all_objects(start_obj: QObject = None) -> str:
     output += widget_lines
 
     if start_obj is None:
-        start_obj = QApplication.instance()
+        start_obj = objects.qapp
 
     pyqt_lines: List[str] = []
     _get_pyqt_objects(pyqt_lines, start_obj)

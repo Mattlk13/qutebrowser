@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Handling of HTTP cookies."""
 
@@ -102,7 +102,7 @@ class CookieJar(RAMCookieJar):
     def purge_old_cookies(self):
         """Purge expired cookies from the cookie jar."""
         # Based on:
-        # http://doc.qt.io/qt-5/qtwebkitexamples-webkitwidgets-browser-cookiejar-cpp.html
+        # https://doc.qt.io/archives/qt-5.5/qtwebkitexamples-webkitwidgets-browser-cookiejar-cpp.html
         now = QDateTime.currentDateTime()
         cookies = [c for c in self.allCookies()
                    if c.isSessionCookie() or

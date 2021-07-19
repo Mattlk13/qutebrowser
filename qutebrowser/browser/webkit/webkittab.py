@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2016-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2016-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,14 +15,14 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Wrapper over our (QtWebKit) WebView."""
 
 import re
 import functools
 import xml.etree.ElementTree
-from typing import cast, Iterable
+from typing import cast, Iterable, Optional
 
 from PyQt5.QtCore import pyqtSlot, Qt, QUrl, QPoint, QTimer, QSizeF, QSize
 from PyQt5.QtGui import QIcon
@@ -33,8 +33,8 @@ from PyQt5.QtPrintSupport import QPrinter
 
 from qutebrowser.browser import browsertab, shared
 from qutebrowser.browser.webkit import (webview, tabhistory, webkitelem,
-                                        webkitsettings)
-from qutebrowser.utils import qtutils, usertypes, utils, log, debug
+                                        webkitsettings, webkitinspector)
+from qutebrowser.utils import qtutils, usertypes, utils, log, debug, resources
 from qutebrowser.keyinput import modeman
 from qutebrowser.qt import sip
 
@@ -227,7 +227,7 @@ class WebKitCaret(browsertab.AbstractCaret):
             # true in caret mode.
             if self._selection_state is browsertab.SelectionState.none:
                 self._widget.page().currentFrame().evaluateJavaScript(
-                    utils.read_file('javascript/position_caret.js'))
+                    resources.read_file('javascript/position_caret.js'))
 
     @pyqtSlot(usertypes.KeyMode)
     def _on_mode_left(self, _mode):
@@ -687,7 +687,7 @@ class WebKitHistory(browsertab.AbstractHistory):
 
 class WebKitElements(browsertab.AbstractElements):
 
-    """QtWebKit implemementations related to elements on the page."""
+    """QtWebKit implementations related to elements on the page."""
 
     _tab: 'WebKitTab'
 
@@ -765,7 +765,7 @@ class WebKitElements(browsertab.AbstractElements):
         except webkitelem.IsNullError:
             # For some reason, the hit result element can be a null element
             # sometimes (e.g. when clicking the timetable fields on
-            # http://www.sbb.ch/ ).
+            # https://www.sbb.ch/ ).
             log.webview.debug("Hit test result element is null!")
             callback(None)
             return
@@ -807,6 +807,9 @@ class WebKitTabPrivate(browsertab.AbstractTabPrivate):
         document_element = self._widget.page().mainFrame().documentElement()
         result = document_element.evaluateJavaScript(code)
         return result
+
+    def _init_inspector(self, splitter, win_id, parent=None):
+        return webkitinspector.WebKitInspector(splitter, win_id, parent)
 
 
 class WebKitTab(browsertab.AbstractTab):
@@ -887,6 +890,9 @@ class WebKitTab(browsertab.AbstractTab):
 
     def title(self):
         return self._widget.title()
+
+    def renderer_process_pid(self) -> Optional[int]:
+        return None
 
     @pyqtSlot()
     def _on_history_trigger(self):

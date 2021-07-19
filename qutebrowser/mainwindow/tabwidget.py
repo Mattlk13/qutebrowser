@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,15 +15,15 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The tab widget used for TabbedBrowser from browser.py."""
 
 import functools
 import contextlib
+import dataclasses
 from typing import Optional, cast
 
-import attr
 from PyQt5.QtCore import (pyqtSignal, pyqtSlot, Qt, QSize, QRect, QPoint,
                           QTimer, QUrl)
 from PyQt5.QtWidgets import (QTabWidget, QTabBar, QSizePolicy, QCommonStyle,
@@ -212,7 +212,7 @@ class TabWidget(QTabWidget):
         Every single call to setTabText calls the size hinting functions for
         every single tab, which are slow. Since we know we are updating all
         the tab's titles, we can delay this processing by making the tab
-        non-visible. To avoid flickering, disable repaint updates whlie we
+        non-visible. To avoid flickering, disable repaint updates while we
         work.
         """
         bar = self.tabBar()
@@ -639,7 +639,7 @@ class TabBar(QTabBar):
                 main_window = objreg.get('main-window', scope='window',
                                          window=self._win_id)
                 perc = int(confwidth.rstrip('%'))
-                width = main_window.width() * perc / 100
+                width = main_window.width() * perc // 100
             else:
                 width = int(confwidth)
             size = QSize(width, height)
@@ -705,14 +705,28 @@ class TabBar(QTabBar):
             e: The QWheelEvent
         """
         if config.val.tabs.mousewheel_switching:
-            super().wheelEvent(e)
+            if utils.is_mac:
+                # WORKAROUND for this not being customizable until Qt 6:
+                # https://codereview.qt-project.org/c/qt/qtbase/+/327746
+                index = self.currentIndex()
+                if index == -1:
+                    return
+                dx = e.angleDelta().x()
+                dy = e.angleDelta().y()
+                delta = dx if abs(dx) > abs(dy) else dy
+                offset = -1 if delta > 0 else 1
+                index += offset
+                if 0 <= index < self.count():
+                    self.setCurrentIndex(index)
+            else:
+                super().wheelEvent(e)
         else:
             tabbed_browser = objreg.get('tabbed-browser', scope='window',
                                         window=self._win_id)
             tabbed_browser.wheelEvent(e)
 
 
-@attr.s
+@dataclasses.dataclass
 class Layouts:
 
     """Layout information for tab.
@@ -720,9 +734,9 @@ class Layouts:
     Used by TabBarStyle._tab_layout().
     """
 
-    text = attr.ib()
-    icon = attr.ib()
-    indicator = attr.ib()
+    text: QRect
+    icon: QRect
+    indicator: QRect
 
 
 class TabBarStyle(QCommonStyle):
@@ -739,7 +753,7 @@ class TabBarStyle(QCommonStyle):
 
     Based on:
 
-    http://stackoverflow.com/a/17294081
+    https://stackoverflow.com/a/17294081
     https://code.google.com/p/makehuman/source/browse/trunk/makehuman/lib/qtgui.py
     """
 

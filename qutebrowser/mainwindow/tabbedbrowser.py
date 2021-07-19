@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """The main tabbed browser widget."""
 
@@ -23,10 +23,10 @@ import collections
 import functools
 import weakref
 import datetime
+import dataclasses
 from typing import (
     Any, Deque, List, Mapping, MutableMapping, MutableSequence, Optional, Tuple)
 
-import attr
 from PyQt5.QtWidgets import QSizePolicy, QWidget, QApplication
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QTimer, QUrl
 
@@ -35,20 +35,24 @@ from qutebrowser.keyinput import modeman
 from qutebrowser.mainwindow import tabwidget, mainwindow
 from qutebrowser.browser import signalfilter, browsertab, history
 from qutebrowser.utils import (log, usertypes, utils, qtutils, objreg,
-                               urlutils, message, jinja)
+                               urlutils, message, jinja, version)
 from qutebrowser.misc import quitter
 
 
-@attr.s
+@dataclasses.dataclass
 class _UndoEntry:
 
     """Information needed for :undo."""
 
-    url = attr.ib()
-    history = attr.ib()
-    index = attr.ib()
-    pinned = attr.ib()
-    created_at = attr.ib(attr.Factory(datetime.datetime.now))
+    url: QUrl
+    history: bytes
+    index: int
+    pinned: bool
+    created_at: datetime.datetime = dataclasses.field(
+        default_factory=datetime.datetime.now)
+
+
+UndoStackType = MutableSequence[MutableSequence[_UndoEntry]]
 
 
 class TabDeque:
@@ -221,8 +225,7 @@ class TabbedBrowser(QWidget):
 
         # This init is never used, it is immediately thrown away in the next
         # line.
-        self.undo_stack: MutableSequence[MutableSequence[_UndoEntry]] = (
-            collections.deque())
+        self.undo_stack: UndoStackType = collections.deque()
         self._update_stack_size()
         self._filter = signalfilter.SignalFilter(win_id, self)
         self._now_focused = None
@@ -411,7 +414,11 @@ class TabbedBrowser(QWidget):
             add_undo: Whether the tab close can be undone.
             new_undo: Whether the undo entry should be a new item in the stack.
         """
-        last_close = config.val.tabs.last_close
+        if config.val.tabs.tabs_are_windows:
+            last_close = 'close'
+        else:
+            last_close = config.val.tabs.last_close
+
         count = self.widget.count()
 
         if last_close == 'ignore' and count == 1:
@@ -863,7 +870,7 @@ class TabbedBrowser(QWidget):
         start = config.cache['colors.tabs.indicator.start']
         stop = config.cache['colors.tabs.indicator.stop']
         system = config.cache['colors.tabs.indicator.system']
-        color = utils.interpolate_color(start, stop, perc, system)
+        color = qtutils.interpolate_color(start, stop, perc, system)
         self.widget.set_tab_indicator_color(idx, color)
         self.widget.update_tab_title(idx)
         if idx == self.widget.currentIndex():
@@ -880,7 +887,7 @@ class TabbedBrowser(QWidget):
             start = config.cache['colors.tabs.indicator.start']
             stop = config.cache['colors.tabs.indicator.stop']
             system = config.cache['colors.tabs.indicator.system']
-            color = utils.interpolate_color(start, stop, 100, system)
+            color = qtutils.interpolate_color(start, stop, 100, system)
         else:
             color = config.cache['colors.tabs.indicator.error']
         self.widget.set_tab_indicator_color(idx, color)
@@ -922,26 +929,44 @@ class TabbedBrowser(QWidget):
             return
 
         messages = {
-            browsertab.TerminationStatus.abnormal:
-                "Renderer process exited with status {}".format(code),
-            browsertab.TerminationStatus.crashed:
-                "Renderer process crashed",
-            browsertab.TerminationStatus.killed:
-                "Renderer process was killed",
-            browsertab.TerminationStatus.unknown:
-                "Renderer process did not start",
+            browsertab.TerminationStatus.abnormal: "Renderer process exited",
+            browsertab.TerminationStatus.crashed: "Renderer process crashed",
+            browsertab.TerminationStatus.killed: "Renderer process was killed",
+            browsertab.TerminationStatus.unknown: "Renderer process did not start",
         }
-        msg = messages[status]
+        msg = messages[status] + f" (status {code})"
+
+        # WORKAROUND for https://bugreports.qt.io/browse/QTBUG-91715
+        versions = version.qtwebengine_versions()
+        is_qtbug_91715 = (
+            status == browsertab.TerminationStatus.unknown and
+            code == 1002 and
+            versions.webengine == utils.VersionNumber(5, 15, 3))
 
         def show_error_page(html):
             tab.set_html(html)
             log.webview.error(msg)
 
-        url_string = tab.url(requested=True).toDisplayString()
-        error_page = jinja.render(
-            'error.html', title="Error loading {}".format(url_string),
-            url=url_string, error=msg)
-        QTimer.singleShot(100, lambda: show_error_page(error_page))
+        if is_qtbug_91715:
+            log.webview.error(msg)
+            log.webview.error('')
+            log.webview.error(
+                'NOTE: If you see this and "Network service crashed, restarting '
+                'service.", please see:')
+            log.webview.error('https://github.com/qutebrowser/qutebrowser/issues/6235')
+            log.webview.error(
+                'You can set the "qt.workarounds.locale" setting in qutebrowser to '
+                'work around the issue.')
+            log.webview.error(
+                'A proper fix is likely available in QtWebEngine soon (which is why '
+                'the workaround is disabled by default).')
+            log.webview.error('')
+        else:
+            url_string = tab.url(requested=True).toDisplayString()
+            error_page = jinja.render(
+                'error.html', title="Error loading {}".format(url_string),
+                url=url_string, error=msg)
+            QTimer.singleShot(100, lambda: show_error_page(error_page))
 
     def resizeEvent(self, e):
         """Extend resizeEvent of QWidget to emit a resized signal afterwards.

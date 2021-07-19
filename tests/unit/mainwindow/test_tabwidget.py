@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2015-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2015-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 # Copyright 2015-2018 Daniel Schadt
 #
 # This file is part of qutebrowser.
@@ -16,7 +16,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Tests for the custom TabWidget/TabBar."""
 
@@ -36,7 +36,7 @@ class TestTabWidget:
     @pytest.fixture
     def widget(self, qtbot, monkeypatch, config_stub):
         w = tabwidget.TabWidget(0)
-        qtbot.addWidget(w)
+        qtbot.add_widget(w)
         monkeypatch.setattr(tabwidget.objects, 'backend',
                             usertypes.Backend.QtWebKit)
         w.show()
@@ -53,7 +53,7 @@ class TestTabWidget:
         tab = fake_web_tab()
         widget.addTab(tab, icon, 'foobar')
 
-        with qtbot.waitExposed(widget):
+        with qtbot.wait_exposed(widget):
             widget.show()
 
     # Sizing tests
@@ -118,7 +118,7 @@ class TestTabWidget:
         for i in range(num_tabs):
             widget.addTab(fake_web_tab(), 'foobar' + str(i))
 
-        with qtbot.waitExposed(widget):
+        with qtbot.wait_exposed(widget):
             widget.show()
 
         benchmark(widget.update_tab_titles)

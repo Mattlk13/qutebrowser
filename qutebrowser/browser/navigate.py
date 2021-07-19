@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2016-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2016-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Implementation of :navigate."""
 
@@ -134,13 +134,13 @@ def path_up(url, count):
     """
     urlutils.ensure_valid(url)
     url = url.adjusted(QUrl.RemoveFragment | QUrl.RemoveQuery)
-    path = url.path()
+    path = url.path(QUrl.FullyEncoded)
     if not path or path == '/':
         raise Error("Can't go up!")
     for _i in range(0, min(count, path.count('/'))):
         path = posixpath.join(path, posixpath.pardir)
     path = posixpath.normpath(path)
-    url.setPath(path)
+    url.setPath(path, QUrl.StrictMode)
     return url
 
 
@@ -174,9 +174,7 @@ def _find_prevnext(prev, elems):
     if not elems:
         return None
 
-    # pylint: disable=bad-config-option
     for regex in getattr(config.val.hints, option):
-        # pylint: enable=bad-config-option
         log.hints.vdebug(  # type: ignore[attr-defined]
             "== Checking regex '{}'.".format(regex.pattern))
         for e in elems:

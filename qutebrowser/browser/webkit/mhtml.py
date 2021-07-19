@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2015-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2015-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 # Copyright 2015-2018 Daniel Schadt
 #
 # This file is part of qutebrowser.
@@ -16,7 +16,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Utils for writing an MHTML file."""
 
@@ -33,9 +33,9 @@ import email.encoders
 import email.mime.multipart
 import email.message
 import quopri
-from typing import MutableMapping, Set, Tuple
+import dataclasses
+from typing import MutableMapping, Set, Tuple, Callable
 
-import attr
 from PyQt5.QtCore import QUrl
 
 from qutebrowser.browser import downloads
@@ -44,13 +44,13 @@ from qutebrowser.utils import log, objreg, message, usertypes, utils, urlutils
 from qutebrowser.extensions import interceptors
 
 
-@attr.s
+@dataclasses.dataclass
 class _File:
 
-    content = attr.ib()
-    content_type = attr.ib()
-    content_location = attr.ib()
-    transfer_encoding = attr.ib()
+    content: bytes
+    content_type: str
+    content_location: str
+    transfer_encoding: Callable[[email.message.Message], None]
 
 
 _CSS_URL_PATTERNS = [re.compile(x) for x in [
@@ -62,7 +62,7 @@ _CSS_URL_PATTERNS = [re.compile(x) for x in [
 ]]
 
 
-def _get_css_imports_regex(data):
+def _get_css_imports(data):
     """Return all assets that are referenced in the given CSS document.
 
     The returned URLs are relative to the stylesheet's URL.
@@ -77,55 +77,6 @@ def _get_css_imports_regex(data):
             if url:
                 urls.append(url)
     return urls
-
-
-def _get_css_imports_cssutils(data, inline=False):
-    """Return all assets that are referenced in the given CSS document.
-
-    The returned URLs are relative to the stylesheet's URL.
-
-    Args:
-        data: The content of the stylesheet to scan as string.
-        inline: True if the argument is an inline HTML style attribute.
-    """
-    try:
-        import cssutils
-    except ImportError:
-        return None
-
-    # We don't care about invalid CSS data, this will only litter the log
-    # output with CSS errors
-    parser = cssutils.CSSParser(loglevel=100,
-                                fetcher=lambda url: (None, ""), validate=False)
-    if not inline:
-        sheet = parser.parseString(data)
-        return list(cssutils.getUrls(sheet))
-    else:
-        urls = []
-        declaration = parser.parseStyle(data)
-        # prop = background, color, margin, ...
-        for prop in declaration:
-            # value = red, 10px, url(foobar), ...
-            for value in prop.propertyValue:
-                if isinstance(value, cssutils.css.URIValue):
-                    if value.uri:
-                        urls.append(value.uri)
-        return urls
-
-
-def _get_css_imports(data, inline=False):
-    """Return all assets that are referenced in the given CSS document.
-
-    The returned URLs are relative to the stylesheet's URL.
-
-    Args:
-        data: The content of the stylesheet to scan as string.
-        inline: True if the argument is an inline HTML style attribute.
-    """
-    imports = _get_css_imports_cssutils(data, inline)
-    if imports is None:
-        imports = _get_css_imports_regex(data)
-    return imports
 
 
 def _check_rel(element):
@@ -328,7 +279,7 @@ class _Downloader:
         for element in web_frame.findAllElements('[style]'):
             element = webkitelem.WebKitElement(element, tab=self.tab)
             style = element['style']
-            for element_url in _get_css_imports(style, inline=True):
+            for element_url in _get_css_imports(style):
                 self._fetch_url(web_url.resolved(QUrl(element_url)))
 
         # Shortcut if no assets need to be downloaded, otherwise the file would

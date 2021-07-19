@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2016-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2016-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,37 +15,34 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Base class for a wrapper over QWebView/QWebEngineView."""
 
 import enum
 import itertools
 import functools
+import dataclasses
 from typing import (cast, TYPE_CHECKING, Any, Callable, Iterable, List, Optional,
                     Sequence, Set, Type, Union)
 
-import attr
 from PyQt5.QtCore import (pyqtSignal, pyqtSlot, QUrl, QObject, QSizeF, Qt,
-                          QEvent, QPoint)
-from PyQt5.QtGui import QKeyEvent, QIcon
+                          QEvent, QPoint, QRect)
+from PyQt5.QtGui import QKeyEvent, QIcon, QPixmap
 from PyQt5.QtWidgets import QWidget, QApplication, QDialog
 from PyQt5.QtPrintSupport import QPrintDialog, QPrinter
 from PyQt5.QtNetwork import QNetworkAccessManager
 
 if TYPE_CHECKING:
-    from PyQt5.QtWebKit import QWebHistory
+    from PyQt5.QtWebKit import QWebHistory, QWebHistoryItem
     from PyQt5.QtWebKitWidgets import QWebPage
-    from PyQt5.QtWebEngineWidgets import QWebEngineHistory, QWebEnginePage
-
-import pygments
-import pygments.lexers
-import pygments.formatters
+    from PyQt5.QtWebEngineWidgets import (
+        QWebEngineHistory, QWebEngineHistoryItem, QWebEnginePage)
 
 from qutebrowser.keyinput import modeman
 from qutebrowser.config import config
 from qutebrowser.utils import (utils, objreg, usertypes, log, qtutils,
-                               urlutils, message)
+                               urlutils, message, jinja)
 from qutebrowser.misc import miscwidgets, objects, sessions
 from qutebrowser.browser import eventfilter, inspector
 from qutebrowser.qt import sip
@@ -83,15 +80,6 @@ def create(win_id: int,
                      parent=parent)
 
 
-def init() -> None:
-    """Initialize backend-specific modules."""
-    if objects.backend == usertypes.Backend.QtWebEngine:
-        from qutebrowser.browser.webengine import webenginetab
-        webenginetab.init()
-        return
-    assert objects.backend == usertypes.Backend.QtWebKit, objects.backend
-
-
 class WebTabError(Exception):
 
     """Base class for various errors."""
@@ -121,7 +109,7 @@ class TerminationStatus(enum.Enum):
     killed = 3
 
 
-@attr.s
+@dataclasses.dataclass
 class TabData:
 
     """A simple namespace with a fixed set of attributes.
@@ -143,17 +131,17 @@ class TabData:
         splitter: InspectorSplitter used to show inspector inside the tab.
     """
 
-    keep_icon: bool = attr.ib(False)
-    viewing_source: bool = attr.ib(False)
-    inspector: Optional['AbstractWebInspector'] = attr.ib(None)
-    open_target: usertypes.ClickTarget = attr.ib(usertypes.ClickTarget.normal)
-    override_target: Optional[usertypes.ClickTarget] = attr.ib(None)
-    pinned: bool = attr.ib(False)
-    fullscreen: bool = attr.ib(False)
-    netrc_used: bool = attr.ib(False)
-    input_mode: usertypes.KeyMode = attr.ib(usertypes.KeyMode.normal)
-    last_navigation: usertypes.NavigationRequest = attr.ib(None)
-    splitter: miscwidgets.InspectorSplitter = attr.ib(None)
+    keep_icon: bool = False
+    viewing_source: bool = False
+    inspector: Optional['AbstractWebInspector'] = None
+    open_target: usertypes.ClickTarget = usertypes.ClickTarget.normal
+    override_target: Optional[usertypes.ClickTarget] = None
+    pinned: bool = False
+    fullscreen: bool = False
+    netrc_used: bool = False
+    input_mode: usertypes.KeyMode = usertypes.KeyMode.normal
+    last_navigation: Optional[usertypes.NavigationRequest] = None
+    splitter: Optional[miscwidgets.InspectorSplitter] = None
 
     def should_show_icon(self) -> bool:
         return (config.val.tabs.favicons.show == 'always' or
@@ -186,30 +174,52 @@ class AbstractAction:
             raise WebTabError("{} is not a valid web action!".format(name))
         self._widget.triggerPageAction(member)
 
-    def show_source(
-            self,
-            pygments: bool = False  # pylint: disable=redefined-outer-name
-    ) -> None:
+    def show_source(self, pygments: bool = False) -> None:
         """Show the source of the current page in a new tab."""
         raise NotImplementedError
+
+    def _show_html_source(self, html: str) -> None:
+        """Show the given HTML as source page."""
+        tb = objreg.get('tabbed-browser', scope='window', window=self._tab.win_id)
+        new_tab = tb.tabopen(background=False, related=True)
+        new_tab.set_html(html, self._tab.url())
+        new_tab.data.viewing_source = True
+
+    def _show_source_fallback(self, source: str) -> None:
+        """Show source with pygments unavailable."""
+        html = jinja.render(
+            'pre.html',
+            title='Source',
+            content=source,
+            preamble="Note: The optional Pygments dependency wasn't found - "
+            "showing unhighlighted source.",
+        )
+        self._show_html_source(html)
 
     def _show_source_pygments(self) -> None:
 
         def show_source_cb(source: str) -> None:
             """Show source as soon as it's ready."""
-            # WORKAROUND for https://github.com/PyCQA/pylint/issues/491
-            # pylint: disable=no-member
-            lexer = pygments.lexers.HtmlLexer()
-            formatter = pygments.formatters.HtmlFormatter(
-                full=True, linenos='table')
-            # pylint: enable=no-member
-            highlighted = pygments.highlight(source, lexer, formatter)
+            try:
+                import pygments
+                import pygments.lexers
+                import pygments.formatters
+            except ImportError:
+                # Pygments is an optional dependency
+                self._show_source_fallback(source)
+                return
 
-            tb = objreg.get('tabbed-browser', scope='window',
-                            window=self._tab.win_id)
-            new_tab = tb.tabopen(background=False, related=True)
-            new_tab.set_html(highlighted, self._tab.url())
-            new_tab.data.viewing_source = True
+            try:
+                lexer = pygments.lexers.HtmlLexer()
+                formatter = pygments.formatters.HtmlFormatter(
+                    full=True, linenos='table')
+            except AttributeError:
+                # Remaining namespace package from Pygments
+                self._show_source_fallback(source)
+                return
+
+            html = pygments.highlight(source, lexer, formatter)
+            self._show_html_source(html)
 
         self._tab.dump_async(show_source_cb)
 
@@ -268,7 +278,7 @@ class AbstractPrinting:
         diag = QPrintDialog(self._tab)
         if utils.is_mac:
             # For some reason we get a segfault when using open() on macOS
-            ret = diag.exec_()
+            ret = diag.exec()
             if ret == QDialog.Accepted:
                 do_print()
         else:
@@ -625,8 +635,8 @@ class AbstractHistoryPrivate:
         """Deserialize from a format produced by self.serialize."""
         raise NotImplementedError
 
-    def load_items(self, items: Sequence) -> None:
-        """Deserialize from a list of WebHistoryItems."""
+    def load_items(self, items: Sequence[sessions.TabHistoryItem]) -> None:
+        """Deserialize from a list of TabHistoryItems."""
         raise NotImplementedError
 
 
@@ -642,7 +652,7 @@ class AbstractHistory:
     def __len__(self) -> int:
         raise NotImplementedError
 
-    def __iter__(self) -> Iterable:
+    def __iter__(self) -> Iterable[Union['QWebHistoryItem', 'QWebEngineHistoryItem']]:
         raise NotImplementedError
 
     def _check_count(self, count: int) -> None:
@@ -860,13 +870,26 @@ class AbstractTabPrivate:
         """Show/hide (and if needed, create) the web inspector for this tab."""
         tabdata = self._tab.data
         if tabdata.inspector is None:
-            tabdata.inspector = inspector.create(
+            assert tabdata.splitter is not None
+            tabdata.inspector = self._init_inspector(
                 splitter=tabdata.splitter,
                 win_id=self._tab.win_id)
             self._tab.shutting_down.connect(tabdata.inspector.shutdown)
             tabdata.inspector.recreate.connect(self._recreate_inspector)
             tabdata.inspector.inspect(self._widget.page())
         tabdata.inspector.set_position(position)
+
+    def _init_inspector(self, splitter: 'miscwidgets.InspectorSplitter',
+           win_id: int,
+           parent: QWidget = None) -> 'AbstractWebInspector':
+        """Get a WebKitInspector/WebEngineInspector.
+
+        Args:
+            splitter: InspectorSplitter where the inspector can be placed.
+            win_id: The window ID this inspector is associated with.
+            parent: The Qt parent to set.
+        """
+        raise NotImplementedError
 
 
 class AbstractTab(QWidget):
@@ -921,7 +944,7 @@ class AbstractTab(QWidget):
     _insecure_hosts: Set[str] = set()
 
     def __init__(self, *, win_id: int,
-                 mode_manager: modeman.ModeManager,
+                 mode_manager: 'modeman.ModeManager',
                  private: bool,
                  parent: QWidget = None) -> None:
         utils.unused(mode_manager)  # needed for mypy
@@ -1180,6 +1203,30 @@ class AbstractTab(QWidget):
     def set_pinned(self, pinned: bool) -> None:
         self.data.pinned = pinned
         self.pinned_changed.emit(pinned)
+
+    def renderer_process_pid(self) -> Optional[int]:
+        """Get the PID of the underlying renderer process.
+
+        Returns None if the PID can't be determined or if getting the PID isn't
+        supported.
+        """
+        raise NotImplementedError
+
+    def grab_pixmap(self, rect: QRect = None) -> Optional[QPixmap]:
+        """Grab a QPixmap of the displayed page.
+
+        Returns None if we got a null pixmap from Qt.
+        """
+        if rect is None:
+            pic = self._widget.grab()
+        else:
+            qtutils.ensure_valid(rect)
+            pic = self._widget.grab(rect)
+
+        if pic.isNull():
+            return None
+
+        return pic
 
     def __repr__(self) -> str:
         try:

@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Helpers related to quitting qutebrowser cleanly."""
 
@@ -32,7 +32,6 @@ import subprocess
 from typing import Iterable, Mapping, MutableSequence, Sequence, cast
 
 from PyQt5.QtCore import QObject, pyqtSignal, QTimer
-from PyQt5.QtWidgets import QApplication
 try:
     import hunter
 except ImportError:
@@ -55,7 +54,7 @@ class Quitter(QObject):
 
     Attributes:
         quit_status: The current quitting status.
-        _is_shutting_down: Whether we're currently shutting down.
+        is_shutting_down: Whether we're currently shutting down.
         _args: The argparse namespace.
     """
 
@@ -70,7 +69,7 @@ class Quitter(QObject):
             'tabs': False,
             'main': False,
         }
-        self._is_shutting_down = False
+        self.is_shutting_down = False
         self._args = args
 
     def on_last_window_closed(self) -> None:
@@ -215,9 +214,9 @@ class Quitter(QObject):
                             closing.
             is_restart: If we're planning to restart.
         """
-        if self._is_shutting_down:
+        if self.is_shutting_down:
             return
-        self._is_shutting_down = True
+        self.is_shutting_down = True
         log.destroy.debug("Shutting down with status {}, session {}...".format(
             status, session))
 
@@ -267,7 +266,7 @@ class Quitter(QObject):
             else:
                 print("Now logging late shutdown.", file=sys.stderr)
                 hunter.trace()
-        QApplication.instance().exit(status)
+        objects.qapp.exit(status)
 
 
 @cmdutils.register(name='quit')
@@ -311,7 +310,6 @@ def restart() -> None:
 def init(args: argparse.Namespace) -> None:
     """Initialize the global Quitter instance."""
     global instance
-    qapp = QApplication.instance()
-    instance = Quitter(args=args, parent=qapp)
+    instance = Quitter(args=args, parent=objects.qapp)
     instance.shutting_down.connect(log.shutdown_log)
-    qapp.lastWindowClosed.connect(instance.on_last_window_closed)
+    objects.qapp.lastWindowClosed.connect(instance.on_last_window_closed)

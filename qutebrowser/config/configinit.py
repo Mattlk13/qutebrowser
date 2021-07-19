@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2017-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2017-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Initialization of the configuration."""
 
@@ -58,11 +58,18 @@ def early_init(args: argparse.Namespace) -> None:
     objreg.register('config-commands', config_commands, command_only=True)
 
     config_file = standarddir.config_py()
+    custom_config_py = args.config_py is not None
+
     global _init_errors
 
     try:
-        if os.path.exists(config_file):
-            configfiles.read_config_py(config_file)
+        if os.path.exists(config_file) or custom_config_py:
+            # If we have a custom --config-py flag, we want it to be fatal if it doesn't
+            # exist, so we don't silently fall back to autoconfig.yml in that case.
+            configfiles.read_config_py(
+                config_file,
+                warn_autoconfig=not custom_config_py,
+            )
         else:
             configfiles.read_autoconfig()
     except configexc.ConfigFileErrors as e:
@@ -130,7 +137,7 @@ def late_init(save_manager: savemanager.SaveManager) -> None:
                                text=_init_errors.to_html(),
                                icon=QMessageBox.Warning,
                                plain_text=False)
-        errbox.exec_()
+        errbox.exec()
 
         if _init_errors.fatal:
             sys.exit(usertypes.Exit.err_init)

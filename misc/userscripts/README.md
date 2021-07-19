@@ -17,6 +17,8 @@ The following userscripts are included in the current directory.
   current website.
 - [qute-keepass](./qute-keepass): Insertion of usernames and passwords from keepass
   databases using pykeepass.
+- [qute-keepassxc](./qute-keepassxc): Insert credentials from open KeepassXC database
+  using keepassxc-browser protocol.
 - [qute-pass](./qute-pass): Insert login information using pass and a
   dmenu-compatible application (e.g. dmenu, rofi -dmenu, ...).
 - [qute-lastpass](./qute-lastpass): Similar to qute-pass, for Lastpass.
@@ -24,7 +26,7 @@ The following userscripts are included in the current directory.
 - [qutedmenu](./qutedmenu): Handle open -s && open -t with bemenu.
 - [readability](./readability): Executes python-readability on current page and
   opens the summary as new tab.
-- [readability-js](./readability-js): Processes the current page with the readability 
+- [readability-js](./readability-js): Processes the current page with the readability
   library used in Firefox Reader View and opens the summary as new tab.
 - [ripbang](./ripbang): Adds DuckDuckGo bang as searchengine.
 - [rss](./rss): Keeps track of URLs in RSS feeds and opens new ones.
@@ -32,6 +34,11 @@ The following userscripts are included in the current directory.
 - [tor_identity](./tor_identity): Change your tor identity.
 - [view_in_mpv](./view_in_mpv): Views the current web page in mpv using
   sensible mpv-flags.
+- [qr](./qr): Show a QR code for the current webpage via
+  [qrencode](https://fukuchi.org/works/qrencode/).
+- [kodi](./kodi): Play videos in Kodi.
+- [add-nextcloud-bookmarks](./add-nextcloud-bookmarks): Create bookmarks in Nextcloud's Bookmarks app.
+- [add-nextcloud-cookbook](./add-nextcloud-cookbook): Add recipes to Nextcloud's Cookbook app.
 
 [castnow]: https://github.com/xat/castnow
 [youtube-dl]: https://rg3.github.io/youtube-dl/
@@ -67,7 +74,16 @@ The following userscripts can be found on their own repositories.
    and retrieve they when you want.
 - [doi](https://github.com/cadadr/configuration/blob/master/qutebrowser/userscripts/doi):
   Opens DOIs on Sci-Hub.
-
+- [1password](https://github.com/tomoakley/dotfiles/blob/master/qutebrowser/userscripts/1password):
+  Integration with 1password on macOS.
+- [localhost](https://github.com/SidharthArya/.qutebrowser/blob/master/userscripts/localhost):
+  Quickly navigate to localhost:port. For reference: [A quicker way to reach localhost with qutebrowser](https://sidhartharya.me/a-quicker-way-to-reach-localhost-with-qutebrowser/)
+- [untrack-url](https://github.com/qutebrowser/qutebrowser/discussions/6555),
+  convert various URLs (YouTube/Reddit/Twitter/Instagram/Google Maps) to other
+  services (Invidious, Teddit, Nitter, Bibliogram, OpenStreetMap).
+- [CIAvash/qutebrowser-userscripts](https://github.com/CIAvash/qutebrowser-userscripts),
+  various small userscripts written in Raku.
+  
 [Zotero]: https://www.zotero.org/
 [Pocket]: https://getpocket.com/
 [Instapaper]: https://www.instapaper.com/

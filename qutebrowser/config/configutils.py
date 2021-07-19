@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2018-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2018-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 
 """Utilities and data structures used by various config code."""
@@ -25,25 +25,18 @@ import collections
 import itertools
 import operator
 from typing import (
-    TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Union,
+    TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Sequence, Set, Union,
     MutableMapping)
 
 from PyQt5.QtCore import QUrl
+from PyQt5.QtGui import QFontDatabase
+from PyQt5.QtWidgets import QApplication
 
-from qutebrowser.utils import utils, urlmatch, usertypes, qtutils
+from qutebrowser.utils import utils, urlmatch, urlutils, usertypes, qtutils
 from qutebrowser.config import configexc
 
 if TYPE_CHECKING:
     from qutebrowser.config import configdata
-
-
-def _widened_hostnames(hostname: str) -> Iterable[str]:
-    """A generator for widening string hostnames.
-
-    Ex: a.c.foo -> [a.c.foo, c.foo, foo]"""
-    while hostname:
-        yield hostname
-        hostname = hostname.partition(".")[-1]
 
 
 class ScopedValue:
@@ -229,7 +222,7 @@ class Values:
         candidates: List[ScopedValue] = []
         # Urls trailing with '.' are equivalent to non-trailing types.
         # urlutils strips them, so in order to match we will need to as well.
-        widened_hosts = _widened_hostnames(url.host().rstrip('.'))
+        widened_hosts = urlutils.widened_hostnames(url.host().rstrip('.'))
         # We must check the 'None' key as well, in case any patterns that
         # did not have a domain match.
         for host in itertools.chain(widened_hosts, [None]):
@@ -280,6 +273,9 @@ class FontFamilies:
     def __iter__(self) -> Iterator[str]:
         yield from self._families
 
+    def __len__(self) -> int:
+        return len(self._families)
+
     def __repr__(self) -> str:
         return utils.get_repr(self, families=self._families, constructor=True)
 
@@ -288,12 +284,63 @@ class FontFamilies:
 
     def _quoted_families(self) -> Iterator[str]:
         for f in self._families:
-            needs_quoting = any(c in f for c in ', ')
+            needs_quoting = any(c in f for c in '., ')
             yield '"{}"'.format(f) if needs_quoting else f
 
     def to_str(self, *, quote: bool = True) -> str:
         families = self._quoted_families() if quote else self._families
         return ', '.join(families)
+
+    @classmethod
+    def from_system_default(
+            cls,
+            font_type: QFontDatabase.SystemFont = QFontDatabase.FixedFont,
+    ) -> 'FontFamilies':
+        """Get a FontFamilies object for the default system font.
+
+        By default, the monospace font is returned, though via the "font_type" argument,
+        other types can be requested as well.
+
+        Note that (at least) three ways of getting the default monospace font
+        exist:
+
+        1) f = QFont()
+           f.setStyleHint(QFont.Monospace)
+           print(f.defaultFamily())
+
+        2) f = QFont()
+           f.setStyleHint(QFont.TypeWriter)
+           print(f.defaultFamily())
+
+        3) f = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+           print(f.family())
+
+        They yield different results depending on the OS:
+
+                   QFont.Monospace  | QFont.TypeWriter    | QFontDatabase
+                   ------------------------------------------------------
+        Windows:   Courier New      | Courier New         | Courier New
+        Linux:     DejaVu Sans Mono | DejaVu Sans Mono    | monospace
+        macOS:     Menlo            | American Typewriter | Monaco
+
+        Test script: https://p.cmpl.cc/d4dfe573
+
+        On Linux, it seems like both actually resolve to the same font.
+
+        On macOS, "American Typewriter" looks like it indeed tries to imitate a
+        typewriter, so it's not really a suitable UI font.
+
+        Looking at those Wikipedia articles:
+
+        https://en.wikipedia.org/wiki/Monaco_(typeface)
+        https://en.wikipedia.org/wiki/Menlo_(typeface)
+
+        the "right" choice isn't really obvious. Thus, let's go for the
+        QFontDatabase approach here, since it's by far the simplest one.
+        """
+        assert QApplication.instance() is not None
+        font = QFontDatabase.systemFont(font_type)
+        return cls([font.family()])
 
     @classmethod
     def from_str(cls, family_str: str) -> 'FontFamilies':

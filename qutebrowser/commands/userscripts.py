@@ -1,6 +1,6 @@
 # vim: ft=python fileencoding=utf-8 sts=4 sw=4 et:
 
-# Copyright 2014-2020 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
+# Copyright 2014-2021 Florian Bruhin (The Compiler) <mail@qutebrowser.org>
 #
 # This file is part of qutebrowser.
 #
@@ -15,7 +15,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with qutebrowser.  If not, see <http://www.gnu.org/licenses/>.
+# along with qutebrowser.  If not, see <https://www.gnu.org/licenses/>.
 
 """Functions to execute a userscript."""
 
@@ -26,6 +26,7 @@ from typing import cast, Any, MutableMapping, Tuple
 
 from PyQt5.QtCore import pyqtSignal, pyqtSlot, QObject, QSocketNotifier
 
+import qutebrowser
 from qutebrowser.utils import message, log, objreg, standarddir, utils
 from qutebrowser.commands import runners
 from qutebrowser.config import websettings
@@ -53,7 +54,7 @@ class _QtFIFOReader(QObject):
         super().__init__(parent)
         self._filepath = filepath
         # We open as R/W so we never get EOF and have to reopen the pipe.
-        # See http://www.outflux.net/blog/archives/2008/03/09/using-select-on-a-fifo/
+        # See https://www.outflux.net/blog/archives/2008/03/09/using-select-on-a-fifo/
         # We also use os.open and os.fdopen rather than built-in open so we
         # can add O_NONBLOCK.
         # pylint: disable=no-member,useless-suppression
@@ -107,16 +108,17 @@ class _BaseUserscriptRunner(QObject):
     Signals:
         got_cmd: Emitted when a new command arrived and should be executed.
         finished: Emitted when the userscript finished running.
+                  arg: The finished GUIProcess object.
     """
 
     got_cmd = pyqtSignal(str)
-    finished = pyqtSignal()
+    finished = pyqtSignal(guiprocess.GUIProcess)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._cleaned_up = False
         self._filepath = None
-        self._proc = None
+        self.proc = None
         self._env: MutableMapping[str, str] = {}
         self._text_stored = False
         self._html_stored = False
@@ -167,12 +169,12 @@ class _BaseUserscriptRunner(QObject):
         if env is not None:
             self._env.update(env)
 
-        self._proc = guiprocess.GUIProcess(
+        self.proc = guiprocess.GUIProcess(
             'userscript', additional_env=self._env,
             output_messages=output_messages, verbose=verbose, parent=self)
-        self._proc.finished.connect(self.on_proc_finished)
-        self._proc.error.connect(self.on_proc_error)
-        self._proc.start(cmd, args)
+        self.proc.finished.connect(self.on_proc_finished)
+        self.proc.error.connect(self.on_proc_error)
+        self.proc.start(cmd, args)
 
     def _cleanup(self):
         """Clean up temporary files."""
@@ -198,7 +200,7 @@ class _BaseUserscriptRunner(QObject):
                     fn, e))
 
         self._filepath = None
-        self._proc = None
+        self.proc = None
         self._env = {}
         self._text_stored = False
         self._html_stored = False
@@ -287,8 +289,10 @@ class _POSIXUserscriptRunner(_BaseUserscriptRunner):
         self._reader.cleanup()
         self._reader.deleteLater()
         self._reader = None
+
+        proc = self.proc
         super()._cleanup()
-        self.finished.emit()
+        self.finished.emit(proc)
 
 
 class _WindowsUserscriptRunner(_BaseUserscriptRunner):
@@ -320,8 +324,9 @@ class _WindowsUserscriptRunner(_BaseUserscriptRunner):
             log.misc.error("Invalid unicode in userscript output: {}"
                            .format(e))
 
+        proc = self.proc
         super()._cleanup()
-        self.finished.emit()
+        self.finished.emit(proc)
 
     @pyqtSlot()
     def on_proc_error(self):
@@ -395,6 +400,7 @@ def _lookup_path(cmd):
     directories = [
         os.path.join(standarddir.data(), "userscripts"),
         os.path.join(standarddir.data(system=True), "userscripts"),
+        os.path.join(standarddir.config(), "userscripts"),
     ]
     for directory in directories:
         cmd_path = os.path.join(directory, cmd)
@@ -443,6 +449,7 @@ def run_async(tab, cmd, *args, win_id, env, verbose=False,
     env['QUTE_DOWNLOAD_DIR'] = downloads.download_dir()
     env['QUTE_COMMANDLINE_TEXT'] = objreg.get('status-command', scope='window',
                                               window=win_id).text()
+    env['QUTE_VERSION'] = qutebrowser.__version__
 
     cmd_path = os.path.expanduser(cmd)
 
